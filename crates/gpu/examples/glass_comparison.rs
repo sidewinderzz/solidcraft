@@ -169,6 +169,7 @@ fn body(name: &str, mesh: Mesh, color: Vec3, ior: f64, transmission: Option<Tran
         surface: Some(OpaqueSurface::new(color, 0.0, 0.45, ior)?),
         transmission,
         faces: Vec::new(),
+        wood: None,
     })
 }
 

@@ -885,7 +885,15 @@ fn build_scene(
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
         let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        // Wood grain, as the viewport draws it (not on a selected or component-coloured body).
+        let plain = selected || s.colored_components.is_some();
+        let wood = if plain { None } else { s.doc.model_body_wood(body) };
+        let face_woods = if plain {
+            Vec::new()
+        } else {
+            s.doc.face_colors(body).into_iter().filter(|(_, l)| l.grain.is_some()).filter_map(|(f, l)| Some((f as u32, s.doc.look_wood(body, &l)?))).collect()
+        };
+        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), wood, face_woods });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()

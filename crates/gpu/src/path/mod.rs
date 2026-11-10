@@ -47,6 +47,8 @@ macro_rules! path_shader {
             "\n",
             include_str!("textures.wgsl"),
             "\n",
+            include_str!("../../../viewport/src/wood.wgsl"),
+            "\n",
             include_str!("volume.wgsl"),
             "\n",
             include_str!("aging.wgsl"),
@@ -733,7 +735,7 @@ fn admit_device_resources(
     let geometry_bytes = 16
         + a.triangles.max(1) * (100 + scene::model_bytes_per_triangle(scene))
         + scene.meshes.iter().map(|m| m.mesh.positions.len() as u64 * 32).sum::<u64>();
-    let texture_bytes = request.textures.as_ref().map_or(16, |t| textures::packed_bytes(t, scene.meshes.len()));
+    let texture_bytes = request.textures.as_ref().map_or(16, |t| textures::packed_bytes(t, scene.meshes.len())) + textures::wood_bytes(scene);
     let environment_bytes =
         request.environment.as_ref().map_or(48, |source| 16 + u64::from(source.info().width) * u64::from(source.info().height) * 32);
     let node_bytes = a.triangles.max(1) * 64;
@@ -857,7 +859,8 @@ impl ImageExecutor for Executor {
         // Reuse the production conversions and certificates, including retained-f32
         // contacts, exact medium containment, map decoding and environment PDFs.
         // Begin currently rebuilds these immutable uploads; no GPU work is queued.
-        let texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, cancel)?;
+        let mut texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, cancel)?;
+        textures::append_wood(&mut texture_upload, scene, request.camera.target)?;
         let upload = scene::flatten_with_media(scene, request.camera.target, cancel, options.nested_media)?;
         photons::validate_punctual_origins(scene, request.camera.target, options, upload.epsilon, cancel)?;
         let environment = prepare_environment(request, cancel)?;
@@ -1003,7 +1006,7 @@ impl Task {
         request = trace_request(&request, options)?;
         validate_punctual_origin(options, request.camera.target)?;
         let opaque_scene = use_opaque_pipeline(&scene, options);
-        let has_textures = request.textures.is_some();
+        let has_textures = request.textures.is_some() || textures::has_wood(&scene);
         let start = Instant::now();
         let aging = options.aging.gpu_layers([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
         let mut volume = if let Some(v) = options.volume.filter(|v| v.active()) {
@@ -1019,7 +1022,8 @@ impl Task {
         if let Some(resources) = &request.textures {
             resources.validate_scene(&scene)?;
         }
-        let texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, &cancel)?;
+        let mut texture_upload = textures::flatten(request.textures.as_deref(), scene.meshes.len(), request.camera.target, &cancel)?;
+        textures::append_wood(&mut texture_upload, &scene, request.camera.target)?;
         request.textures = None; // GPU upload owns decoded pixels; release captured source bytes.
         let upload = scene::flatten_with_media(&scene, request.camera.target, &cancel, options.nested_media)?;
         // This uniform lane was spare. Keep the material offset mask that the

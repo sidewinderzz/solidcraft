@@ -71,6 +71,7 @@ fn sphere_section(surface: OpaqueSurface, rows: u32, columns: u32, rings: u32) -
             surface: Some(surface),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds,
     }
@@ -645,6 +646,7 @@ fn rough_shadow_overlap_scene(shadow_transmission: bool) -> ProductScene {
         surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 1.0, 1.0).unwrap()),
         transmission: None,
         faces: Vec::new(),
+        wood: None,
     };
     let mut glass = glass_slab(false).meshes.remove(0);
     glass.name = "original off-axis rough closed box".into();
@@ -1320,6 +1322,7 @@ fn photon_receiver_fixture(scattering: f64) -> ProductScene {
         surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 0.5, 1.0).unwrap()),
         transmission: None,
         faces: Vec::new(),
+        wood: None,
     });
     source
 }
@@ -2248,6 +2251,7 @@ fn glass_transport_evidence() {
                 surface: Some(OpaqueSurface::new(color, 0.0, 0.65, 1.5).unwrap()),
                 transmission: None,
                 faces: vec![],
+                wood: None,
             });
         }
     }
@@ -2313,6 +2317,7 @@ fn glass_slab(thin: bool) -> ProductScene {
                 solidcraft_render::transmission::Transmission::new(Vec3::new(-0.5_f64.ln(), -0.8_f64.ln(), 0.0), thin.then_some(1.0)).unwrap(),
             ),
             faces: vec![],
+            wood: None,
         }],
     }
 }
@@ -2529,6 +2534,7 @@ fn admission_ignores_the_cpu_raster_projected_pixel_limit() {
             surface: Some(white()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let mut r = request(100);
@@ -2550,7 +2556,7 @@ fn admission_applies_the_gpu_estimate_instead_of_the_cpu_raster_budget() {
     // in the render crate); the GPU's own estimate stays within its 512 MiB job cap.
     let count = (100 * 1024 * 1024 / std::mem::size_of::<solidcraft_render::FaceAppearance>()).min(1_000_000);
     let mut scene = sphere(white());
-    let appearance = solidcraft_render::FaceAppearance { face: 0, color: [255; 3], opacity: 1.0, surface: None, transmission: None };
+    let appearance = solidcraft_render::FaceAppearance { face: 0, color: [255; 3], opacity: 1.0, surface: None, transmission: None, wood: None };
     scene.meshes[0].faces = vec![appearance; count];
     let r = request(2048);
     let a = admission(&scene, &r, JobOptions::default()).unwrap();
@@ -2822,8 +2828,9 @@ fn gpu_tiny_scene_matches_cpu_studio_with_face_appearance() {
             surface: Some(white()),
             transmission: None,
             faces: [7, 9]
-                .map(|face| solidcraft_render::FaceAppearance { face, color: [0; 3], opacity: 1.0, surface: Some(surface), transmission: None })
+                .map(|face| solidcraft_render::FaceAppearance { face, color: [0; 3], opacity: 1.0, surface: Some(surface), transmission: None, wood: None })
                 .to_vec(),
+                wood: None,
         }],
         bounds,
     };
@@ -3184,6 +3191,7 @@ fn gpu_studio_area_mis_matches_independent_quadrature_and_distance_visibility() 
             surface: Some(surface),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }
     };
     let light = AreaLight { center: [2.0, 0.0, 2.0], u: [1.0, 0.0, 0.0], v: [0.0, -1.0, 0.0], radiance: [3.0; 3] };
@@ -3307,6 +3315,7 @@ fn environment_plane() -> ProductScene {
             surface: Some(white()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds,
     }
@@ -3601,6 +3610,7 @@ fn gpu_shadow_mis_does_not_double_direct_energy_through_index_matched_glass() {
         surface: Some(surface),
         transmission: None,
         faces: vec![],
+        wood: None,
     };
     let light = AreaLight { center: [0.0, 0.0, 2.0], u: [4.0, 0.0, 0.0], v: [0.0, -4.0, 0.0], radiance: [1.0; 3] };
     let mut expected = 0.0;
@@ -3664,6 +3674,7 @@ fn gpu_absorbing_two_sheet_mis_matches_f64_quadrature() {
         surface: Some(surface),
         transmission: None,
         faces: vec![],
+        wood: None,
     };
     let light = AreaLight { center: [0.0, 0.0, 2.0], u: [4.0, 0.0, 0.0], v: [0.0, -4.0, 0.0], radiance: [1.0; 3] };
     let optics = solidcraft_render::transmission::Transmission::new(Vec3::new(0.2, 0.1, 0.05), Some(0.7)).unwrap();
@@ -3894,6 +3905,7 @@ fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
         opacity: 1.0,
         surface: Some(white()),
         transmission: Some(clear_glass()),
+        wood: None,
     });
     assert!(!use_opaque_pipeline(&scene, options));
     scene.meshes[0].faces[0].transmission = None;
@@ -4129,6 +4141,7 @@ fn gpu_finite_emitter_inside_solid_retains_entry_radiance_eta() {
         surface: Some(surface),
         transmission: None,
         faces: vec![],
+        wood: None,
     };
     let light = AreaLight { center: [0.0, 0.0, 0.0], u: [9.0, 0.0, 0.0], v: [0.0, -9.0, 0.0], radiance: [1.0; 3] };
     // Broad finite emitter makes edge/refraction disagreement small; the missing eta term is a 125% error.
@@ -5407,7 +5420,7 @@ fn gpu_scalar_faces_preserve_legacy_roles_and_suppress_only_portable_roles() {
             let face_color = Vec3::new(0.2, 0.4, 0.6);
             let face = OpaqueSurface::new(face_color, 0.3, 0.2, 1.7).unwrap();
             let mut scene = sphere(white());
-            scene.meshes[0].faces.push(FaceAppearance { face: 0, color: [255; 3], opacity: 1., surface: Some(face), transmission: None });
+            scene.meshes[0].faces.push(FaceAppearance { face: 0, color: [255; 3], opacity: 1., surface: Some(face), transmission: None, wood: None });
             let mut task = Task::new(context.clone(), scene, input, JobOptions::default(), CancelToken::default()).unwrap();
             let mut params = vec![0; 32];
             scene::vector(&mut params, point, 0.);
@@ -5536,6 +5549,7 @@ fn gpu_wood_minification_converges_to_mean_and_preserves_scalar_face_override() 
         opacity: 1.,
         surface: Some(OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.3), 0., 1., 1.).unwrap()),
         transmission: None,
+        wood: None,
     }];
     let scalar = render(overridden.clone(), None, 0., std::f64::consts::FRAC_PI_2, false, [1.; 3]);
     let mapped = render(overridden, Some(binding(0.25)), 0., std::f64::consts::FRAC_PI_2, false, [1.; 3]);
@@ -6516,6 +6530,7 @@ fn directional_receiver() -> ProductScene {
             surface: Some(white()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds: Aabb3::EMPTY,
     }

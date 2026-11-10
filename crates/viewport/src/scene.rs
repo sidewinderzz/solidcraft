@@ -34,12 +34,30 @@ pub struct SceneMesh {
     pub closed: bool,
     /// The hatch of its cut face when the scene hatches by part ([`Scene::part_hatch`]).
     pub hatch: Hatch,
+    /// Procedural wood grain over the body's colour (faces without colours of their own).
+    pub wood: Option<crate::wood::WoodShade>,
+    /// Faces with wood of their own: (B-rep face index, wood).
+    pub face_woods: Vec<(u32, crate::wood::WoodShade)>,
 }
 
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0) }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), wood: None, face_woods: Vec::new() }
+    }
+
+    /// The wood on triangle face `face`, if any: the face's own, else the body's (unless the
+    /// face has a plain colour of its own).
+    pub fn wood_at(&self, face: Option<u32>) -> Option<&crate::wood::WoodShade> {
+        if let Some(f) = face {
+            if let Some((_, w)) = self.face_woods.iter().find(|(i, _)| *i == f) {
+                return Some(w);
+            }
+            if self.face_colors.iter().any(|(i, _)| *i == f) {
+                return None;
+            }
+        }
+        self.wood.as_ref()
     }
 
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
