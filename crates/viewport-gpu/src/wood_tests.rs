@@ -14,7 +14,7 @@ fn wood_texel(slot: u32, k: u32) -> vec4<f32> { return rec[k]; }
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.x;
     if (i >= arrayLength(&pts)) { return; }
-    out[i] = wood_sample(1u, wood_grain(1u, pts[i].xyz));
+    out[i] = wood_sample(1u, wood_grain(1u, pts[i].xyz), pts[i].w);
 }
 "#;
 
@@ -86,7 +86,7 @@ fn the_gpu_wood_matches_the_cpu_wood() {
     let points: Vec<[f32; 4]> = (0..4096)
         .map(|i| {
             let f = |k: u32, n: f32| ((i as u32).wrapping_mul(k) % 10007) as f32 / 10007.0 * n;
-            [f(7919, 600.0), f(104_729, 100.0), if i % 3 == 0 { 20.0 } else { f(1_299_709, 20.0) }, 1.0]
+            [f(7919, 600.0), f(104_729, 100.0), if i % 3 == 0 { 20.0 } else { f(1_299_709, 20.0) }, (i % 5) as f32 * 0.6]
         })
         .collect();
     for species in wood::SPECIES {
@@ -95,7 +95,7 @@ fn the_gpu_wood_matches_the_cpu_wood() {
         let mut off = 0;
         let mut worst = 0f32;
         for (p, g) in points.iter().zip(&gpu) {
-            let c = shade.sample(Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64));
+            let c = shade.sample_seen(Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64), p[3] as f64);
             let d = (0..3).map(|k| (c.srgb[k] - g[k]).abs()).fold((c.roughness - g[3]).abs(), f32::max);
             if d > 2.0 / 255.0 {
                 off += 1;

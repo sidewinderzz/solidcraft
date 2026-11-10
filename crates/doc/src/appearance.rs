@@ -781,7 +781,7 @@ mod tests {
                 assert_eq!(find(preset.name), Some(preset));
             }
             for (category, count) in [
-                (Category::Wood, 8),
+                (Category::Wood, 16),
                 (Category::Metal, 10),
                 (Category::Plastic, 10),
                 (Category::Glass, 6),

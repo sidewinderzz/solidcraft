@@ -38,7 +38,7 @@ fn wood_grain(slot: u32, p: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(dot(wood_texel(slot, 5u), q), dot(wood_texel(slot, 6u), q), dot(wood_texel(slot, 7u), q));
 }
 
-fn wood_sample(slot: u32, g: vec3<f32>) -> vec4<f32> {
+fn wood_sample(slot: u32, g: vec3<f32>, fp: f32) -> vec4<f32> {
     let early = wood_texel(slot, 0u);
     let late_c = wood_texel(slot, 1u);
     let streak_c = wood_texel(slot, 2u);
@@ -50,19 +50,24 @@ fn wood_sample(slot: u32, g: vec3<f32>) -> vec4<f32> {
     let w = wood_scaled(g, 0.004, 0.02);
     let dy = wood_noise(w, s) - 0.5;
     let dz = wood_noise(vec3<f32>(w.x + 17.0, w.y + 31.0, w.z + 47.0), s ^ 0x9e3779b9u) - 0.5;
-    let y = g.y + 2.0 * figure_mm * dy;
-    let z = g.z + 2.0 * figure_mm * dz;
+    let rings = 1.0 - wood_smooth(0.6, 1.4, fp / ring_mm);
+    let fine = 1.0 - wood_smooth(1.2, 4.0, fp);
+    let w2 = wood_scaled(g, 0.0012, 0.006);
+    let ey = wood_noise(vec3<f32>(w2.x + 5.0, w2.y + 11.0, w2.z + 23.0), s ^ 0x510e527fu) - 0.5;
+    let ez = wood_noise(vec3<f32>(w2.x + 41.0, w2.y + 3.0, w2.z + 29.0), s ^ 0x9b05688cu) - 0.5;
+    let y = g.y + figure_mm * (2.0 * dy + 9.0 * ey);
+    let z = g.z + figure_mm * (2.0 * dz + 9.0 * ez);
     let r = sqrt(y * y + z * z);
     let ring = r / ring_mm + 0.6 * (wood_noise(wood_scaled(vec3<f32>(g.x, y, z), 0.01, 0.04), s ^ 0x85ebca6bu) - 0.5);
     let t = ring - floor(ring);
-    let late = wood_smooth(0.55, 0.95, t) * contrast;
+    let late = mix(0.25, wood_smooth(0.55, 0.95, t), rings) * contrast;
     let q = vec3<f32>(g.x, y, z);
     let light = wood_texel(slot, 4u).yzw;
     let zone = wood_smooth(0.35, 0.8, wood_noise(wood_scaled(q, 0.0015, 0.05), s ^ 0x165667b1u));
     let streak = wood_smooth(0.6, 0.92, wood_noise(wood_scaled(q, 0.004, 0.25), s ^ 0xc2b2ae35u)) * k.y;
-    let pore = wood_smooth(1.0 - 0.3 * k.x, 1.0, wood_noise(wood_scaled(q, 0.08, 1.3), s ^ 0x27d4eb2fu)) * min(k.x, 1.0) * (1.0 - 0.5 * late);
-    let fleck = wood_smooth(0.8, 0.97, wood_noise(wood_scaled(q, 0.3, 1.6), s ^ 0x6a09e667u)) * (0.25 + 0.5 * k.x);
-    let fibre = (0.94 + 0.12 * wood_noise(wood_scaled(q, 0.03, 1.2), s ^ 0x3c6ef372u)) * (0.96 + 0.08 * wood_noise(wood_scaled(q, 0.05, 4.0), s ^ 0xbb67ae85u));
+    let pore = wood_smooth(1.0 - 0.3 * k.x, 1.0, wood_noise(wood_scaled(q, 0.08, 1.3), s ^ 0x27d4eb2fu)) * min(k.x, 1.0) * (1.0 - 0.5 * late) * fine;
+    let fleck = wood_smooth(0.8, 0.97, wood_noise(wood_scaled(q, 0.3, 1.6), s ^ 0x6a09e667u)) * (0.25 + 0.5 * k.x) * fine;
+    let fibre = mix(1.0, (0.94 + 0.12 * wood_noise(wood_scaled(q, 0.03, 1.2), s ^ 0x3c6ef372u)) * (0.96 + 0.08 * wood_noise(wood_scaled(q, 0.05, 4.0), s ^ 0xbb67ae85u)), fine);
     let base = mix(mix(early.xyz, light, zone), late_c.xyz, late);
     let streaked = mix(base, streak_c.xyz, streak);
     let flecked = mix(streaked, light, 0.35 * fleck);
