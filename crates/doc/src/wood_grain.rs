@@ -22,6 +22,9 @@ pub struct Grain {
     pub ring_spacing_mm: Option<f64>,
     /// How much the rings wander, relative to the species (1: as the species).
     pub figure: f64,
+    /// Where the log's centre (the pith) lies from the board's middle, mm: `[across its width,
+    /// across its thickness]`. `[0, 0]`: rings centred on the board.
+    pub pith_offset_mm: [f64; 2],
 }
 
 /// Which way the grain runs.
@@ -37,7 +40,7 @@ impl Grain {
     /// The species' default grain.
     pub fn species(species: &str) -> Option<Grain> {
         wood::species_look(species)?;
-        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0 })
+        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0] })
     }
 
     /// Check the values (finite, in range, a known species).
@@ -56,6 +59,9 @@ impl Grain {
         }
         if !(self.figure.is_finite() && (0.0..=5.0).contains(&self.figure)) {
             return Err("`grain.figure` must be 0…5".into());
+        }
+        if !self.pith_offset_mm.iter().all(|v| v.is_finite() && v.abs() <= MAX_PITH_MM) {
+            return Err(format!("`grain.pith_offset_mm` must be within ±{MAX_PITH_MM} mm (past that the rings are straight lines)"));
         }
         if let GrainAxis::Fixed(v) = self.axis {
             let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
@@ -78,7 +84,7 @@ impl Grain {
             GrainAxis::Long => Axis::Long,
             GrainAxis::Fixed(v) => Axis::Fixed(v),
         };
-        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, ..Frame::default() })?;
+        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm })?;
         Some(WoodShade { look, to_grain })
     }
 
@@ -95,10 +101,26 @@ impl Grain {
                 "scale" => self.scale = x.as_f64().ok_or("`grain.scale` must be a number")?,
                 "ring_spacing_mm" => self.ring_spacing_mm = Some(x.as_f64().ok_or("`grain.ring_spacing_mm` must be a number")?),
                 "figure" => self.figure = x.as_f64().ok_or("`grain.figure` must be a number")?,
-                other => return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure)")),
+                "pith_offset_mm" => self.pith_offset_mm = parse_pith(x)?,
+                other => return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm)")),
             }
         }
         self.validate()
+    }
+}
+
+/// The farthest the pith may lie from a board, mm (100 m: far past any log, where the rings
+/// are straight lines; farther would cost the grain's precision).
+pub const MAX_PITH_MM: f64 = 100_000.0;
+
+/// `pith_offset_mm`: `[across the width, across the thickness]`, or one number (across the
+/// thickness).
+fn parse_pith(v: &Value) -> Result<[f64; 2], String> {
+    let bad = || "`grain.pith_offset_mm` must be [across width, across thickness] in mm, or one number".to_string();
+    match v {
+        Value::Number(n) => Ok([0.0, n.as_f64().ok_or_else(bad)?]),
+        Value::Array(a) if a.len() == 2 => Ok([a[0].as_f64().ok_or_else(bad)?, a[1].as_f64().ok_or_else(bad)?]),
+        _ => Err(bad()),
     }
 }
 
@@ -149,6 +171,8 @@ struct GrainWire {
     ring_spacing_mm: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     figure: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pith_offset_mm: Option<[f64; 2]>,
 }
 
 impl TryFrom<GrainWire> for Grain {
@@ -161,6 +185,7 @@ impl TryFrom<GrainWire> for Grain {
             scale: w.scale.unwrap_or(1.0),
             ring_spacing_mm: w.ring_spacing_mm,
             figure: w.figure.unwrap_or(1.0),
+            pith_offset_mm: w.pith_offset_mm.unwrap_or([0.0, 0.0]),
         };
         g.validate()?;
         Ok(g)
@@ -179,6 +204,7 @@ impl From<Grain> for GrainWire {
             scale: (g.scale != 1.0).then_some(g.scale),
             ring_spacing_mm: g.ring_spacing_mm,
             figure: (g.figure != 1.0).then_some(g.figure),
+            pith_offset_mm: (g.pith_offset_mm != [0.0, 0.0]).then_some(g.pith_offset_mm),
         }
     }
 }
@@ -192,11 +218,11 @@ mod tests {
     fn grain_settings_round_trip_and_refuse_bad_values() {
         let mut g = Grain::species("starter.wood.walnut-dark").unwrap();
         assert_eq!(serde_json::to_value(&g).unwrap(), json!({"species": "walnut-dark"}));
-        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5})).unwrap();
+        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0]})).unwrap();
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
-        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true})] {
+        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"})] {
             assert!(g.clone().apply_json(&bad).is_err(), "{bad}");
         }
         assert!(serde_json::from_value::<Grain>(json!({"species": "walnut-dark", "scale": 1e9})).is_err());

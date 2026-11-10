@@ -238,20 +238,22 @@ pub struct Frame {
     pub axis: Axis,
     /// Scale of the whole pattern (1: real size).
     pub scale: f64,
-    /// How far from the body's middle the pith lies, mm, across the body's thinnest direction:
-    /// far for flat-sawn boards (cathedral arches), near for quarter-sawn faces.
-    pub pith_mm: f64,
+    /// Where the pith (the log's centre) lies from the body's middle, mm: `[across its width,
+    /// across its thickness]`. `[0, 0]` (the default) centres the rings on the board, so they
+    /// grow out from its middle; moving it out places the board elsewhere in the log, toward
+    /// its bark (cathedral arches on a flat-sawn face, straight lines once far away).
+    pub pith_mm: [f64; 2],
 }
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { axis: Axis::Long, scale: 1.0, pith_mm: 140.0 }
+        Frame { axis: Axis::Long, scale: 1.0, pith_mm: [0.0, 0.0] }
     }
 }
 
 /// The grain map (world → grain space) of a body drawn as `triangles` over `positions` (world,
 /// mm): the grain runs along `frame.axis` (or the body's principal axis), the pith lies
-/// `frame.pith_mm` from the body's middle across its thinnest direction, and grain coordinates
+/// `frame.pith_mm` from the body's middle (across its width, across its thickness), and grain coordinates
 /// along the axis count from the body's end, so a body that grows longer keeps the grain it had.
 /// `None` for a body with no area.
 pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) -> Option<[[f32; 4]; 3]> {
@@ -301,7 +303,7 @@ pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) 
     let wide = along.cross(thin);
     // From the body's start along the grain, so lengthening the far end keeps the pattern.
     let start = positions.iter().map(|p| p.dot(along)).fold(f64::INFINITY, f64::min);
-    let pith = c - thin * frame.pith_mm;
+    let pith = c + wide * frame.pith_mm[0] + thin * frame.pith_mm[1];
     let s = 1.0 / frame.scale.clamp(0.01, 100.0);
     let row = |axis: Vec3, offset: f64| [(axis.x * s) as f32, (axis.y * s) as f32, (axis.z * s) as f32, (-offset * s) as f32];
     Some([row(along, start), row(wide, pith.dot(wide)), row(thin, pith.dot(thin))])
@@ -349,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn a_board_runs_lengthwise_and_the_pith_lies_below_its_thickness() {
+    fn a_board_runs_lengthwise_with_the_pith_in_its_middle_unless_moved() {
         let (p, t) = board();
         let m = frame_for_mesh(&p, &t, Frame::default()).unwrap();
         // Grain along X.
@@ -360,7 +362,11 @@ mod tests {
         let w = WoodShade { look: species_look("walnut-dark").unwrap(), to_grain: m };
         let g = w.grain_point(Vec3::new(0.0, 50.0, 10.0));
         assert!(g[0].abs() < 1e-3, "{g:?}");
-        assert!((g[2].abs() - 140.0).abs() < 1e-2, "{g:?}");
+        assert!(g[1].abs() < 1e-3 && g[2].abs() < 1e-3, "{g:?}");
+        // Moved 140 mm across the thickness, the board's middle is 140 mm from the pith.
+        let m = frame_for_mesh(&p, &t, Frame { pith_mm: [0.0, 140.0], ..Frame::default() }).unwrap();
+        let g = WoodShade { look: w.look, to_grain: m }.grain_point(Vec3::new(0.0, 50.0, 10.0));
+        assert!(g[1].abs() < 1e-3 && (g[2].abs() - 140.0).abs() < 1e-2, "{g:?}");
     }
 
     #[test]
