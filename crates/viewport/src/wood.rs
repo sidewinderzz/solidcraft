@@ -69,18 +69,55 @@ const fn species(
     Species { id, look: WoodLook { early, late, streak, light, ring_mm, contrast, figure_mm, pores, streaks, roughness, seed: 0 } }
 }
 
-/// The starter species, in the starter pack's order.
+/// A species as raw, unfinished timber: greyer, paler, flatter and matt (what an oil or a
+/// lacquer then deepens into the finished look).
+const fn raw(id: &'static str, finished: &Species) -> Species {
+    const fn dull(c: [f32; 3]) -> [f32; 3] {
+        const fn f(v: f32, grey: f32) -> f32 {
+            (v + (grey - v) * 0.25) * 0.78 + 0.2
+        }
+        let grey = 0.3 * c[0] + 0.55 * c[1] + 0.15 * c[2];
+        [f(c[0], grey), f(c[1], grey), f(c[2], grey)]
+    }
+    let l = finished.look;
+    Species {
+        id,
+        look: WoodLook { early: dull(l.early), late: dull(l.late), streak: dull(l.streak), light: dull(l.light), contrast: l.contrast * 0.8, streaks: l.streaks * 0.8, roughness: [0.80, 0.88], ..l },
+    }
+}
+
+const OAK_HONEY: Species = species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]);
+const OAK_SMOKED: Species = species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]);
+// Walnut with a clear finish: warm chocolate heartwood, amber zones, near-black streaks, open
+// pores (no sapwood band).
+const WALNUT: Species = species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(46, 29, 22), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.6, [0.30, 0.38]);
+// Raw walnut is its own colours: a cool grey-brown with a faint purple cast.
+const WALNUT_RAW: Species = species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.45, [0.80, 0.88]);
+const MAPLE: Species = species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]);
+const CHERRY: Species = species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]);
+const ASH: Species = species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
+const BIRCH: Species = species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]);
+const TEAK: Species = species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]);
+
+/// The starter species, in the starter pack's order: each with a clear finish (`oak-honey`) and
+/// as raw timber (`oak-honey-raw`).
 pub const SPECIES: &[Species] = &[
-    species("oak-honey", rgb(204, 160, 102), rgb(150, 104, 56), rgb(132, 92, 52), rgb(226, 188, 130), 3.0, 0.7, 2.5, 0.8, 0.3, [0.60, 0.70]),
-    species("oak-smoked", rgb(110, 88, 68), rgb(62, 46, 34), rgb(48, 36, 28), rgb(134, 110, 86), 3.0, 0.7, 2.5, 0.8, 0.3, [0.64, 0.74]),
-    // Walnut: chocolate heartwood with lighter golden-brown zones, near-black streaks and open
-    // pores (no sapwood band).
-    species("walnut-dark", rgb(96, 67, 47), rgb(56, 39, 29), rgb(42, 30, 25), rgb(128, 93, 63), 4.0, 0.45, 4.0, 0.6, 0.55, [0.52, 0.64]),
-    species("maple-light", rgb(232, 208, 164), rgb(206, 174, 124), rgb(190, 156, 110), rgb(244, 226, 188), 3.5, 0.3, 2.0, 0.1, 0.2, [0.52, 0.60]),
-    species("cherry-warm", rgb(180, 112, 74), rgb(140, 80, 50), rgb(116, 64, 42), rgb(204, 140, 96), 3.0, 0.4, 2.5, 0.2, 0.35, [0.54, 0.62]),
-    species("ash-pale", rgb(222, 200, 162), rgb(164, 130, 88), rgb(150, 120, 84), rgb(238, 220, 186), 3.5, 0.75, 2.5, 0.75, 0.2, [0.64, 0.76]),
-    species("birch-cream", rgb(232, 214, 176), rgb(210, 184, 140), rgb(196, 168, 126), rgb(244, 230, 198), 3.0, 0.3, 2.0, 0.1, 0.2, [0.58, 0.66]),
-    species("teak-golden", rgb(178, 132, 74), rgb(128, 90, 46), rgb(92, 66, 38), rgb(206, 164, 100), 4.5, 0.5, 3.0, 0.45, 0.5, [0.56, 0.66]),
+    OAK_HONEY,
+    raw("oak-honey-raw", &OAK_HONEY),
+    OAK_SMOKED,
+    raw("oak-smoked-raw", &OAK_SMOKED),
+    WALNUT,
+    WALNUT_RAW,
+    MAPLE,
+    raw("maple-light-raw", &MAPLE),
+    CHERRY,
+    raw("cherry-warm-raw", &CHERRY),
+    ASH,
+    raw("ash-pale-raw", &ASH),
+    BIRCH,
+    raw("birch-cream-raw", &BIRCH),
+    TEAK,
+    raw("teak-golden-raw", &TEAK),
 ];
 
 /// A species by id (`walnut-dark`) or starter preset id (`starter.wood.walnut-dark`).
@@ -113,7 +150,15 @@ impl WoodShade {
 
     /// The wood's colour and roughness at `p` (world, mm).
     pub fn sample(&self, p: Vec3) -> WoodSample {
-        sample(&self.look, self.grain_point(p))
+        sample(&self.look, self.grain_point(p), 0.0)
+    }
+
+    /// The same, as a pixel `footprint_mm` wide (world) sees it: detail finer than the pixel
+    /// fades to its average, so a far view is calm and does not shimmer.
+    pub fn sample_seen(&self, p: Vec3, footprint_mm: f64) -> WoodSample {
+        let r = self.to_grain[1];
+        let scale = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
+        sample(&self.look, self.grain_point(p), footprint_mm as f32 * scale)
     }
 
     /// The same shade seen through a rigid or affine move `m` (rows, world ← local): for a
@@ -192,21 +237,30 @@ fn scaled(g: [f32; 3], along: f32, across: f32) -> [f32; 3] {
     [g[0] * along, g[1] * across, g[2] * across]
 }
 
-/// The wood function, at point `g` in grain space (mm). Mirrors the WGSL `wood_sample`.
-pub fn sample(l: &WoodLook, g: [f32; 3]) -> WoodSample {
+/// The wood function, at point `g` in grain space (mm), seen by a pixel `fp` wide (grain mm; 0:
+/// a point). Mirrors the WGSL `wood_sample`.
+pub fn sample(l: &WoodLook, g: [f32; 3], fp: f32) -> WoodSample {
     let s = l.seed;
+    // How much of the rings, and of the fine detail (pores, flecks, fibres), a pixel this wide
+    // still resolves.
+    let rings = 1.0 - smoothstep(0.6, 1.4, fp / l.ring_mm);
+    let fine = 1.0 - smoothstep(1.2, 4.0, fp);
     // Figure: the rings wander, slowly along the grain and a little faster across it.
     let w = scaled(g, 0.004, 0.02);
     let dy = noise(w, s) - 0.5;
     let dz = noise([w[0] + 17.0, w[1] + 31.0, w[2] + 47.0], s ^ 0x9e37_79b9) - 0.5;
-    let y = g[1] + 2.0 * l.figure_mm * dy;
-    let z = g[2] + 2.0 * l.figure_mm * dz;
+    // And they sweep in long, slow waves: the flowing cathedral figure of a flat-sawn board.
+    let w2 = scaled(g, 0.0012, 0.006);
+    let ey = noise([w2[0] + 5.0, w2[1] + 11.0, w2[2] + 23.0], s ^ 0x510e_527f) - 0.5;
+    let ez = noise([w2[0] + 41.0, w2[1] + 3.0, w2[2] + 29.0], s ^ 0x9b05_688c) - 0.5;
+    let y = g[1] + l.figure_mm * (2.0 * dy + 9.0 * ey);
+    let z = g[2] + l.figure_mm * (2.0 * dz + 9.0 * ez);
     let r = (y * y + z * z).sqrt();
     // Rings: uneven widths from year to year.
     let ring = r / l.ring_mm + 0.6 * (noise(scaled([g[0], y, z], 0.01, 0.04), s ^ 0x85eb_ca6b) - 0.5);
     let t = ring - ring.floor();
     // Earlywood grades into latewood across the ring, which ends sharply at the next ring.
-    let late = smoothstep(0.55, 0.95, t) * l.contrast;
+    let late = mixf(0.25, smoothstep(0.55, 0.95, t), rings) * l.contrast;
     let q = [g[0], y, z];
     // Colour zones: broad bands of the lighter, warmer tone that run the length of a board.
     let zone = smoothstep(0.35, 0.8, noise(scaled(q, 0.0015, 0.05), s ^ 0x1656_67b1));
@@ -214,11 +268,11 @@ pub fn sample(l: &WoodLook, g: [f32; 3]) -> WoodSample {
     let streak = smoothstep(0.6, 0.92, noise(scaled(q, 0.004, 0.25), s ^ 0xc2b2_ae35)) * l.streaks;
     // Pores: the cut vessels, short dark dashes along the grain (dots on end grain), mostly in
     // the earlywood.
-    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.08, 1.3), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late);
+    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.08, 1.3), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * fine;
     // Ray flecks: short pale ticks.
-    let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores);
+    let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * fine;
     // Fibres along the grain, coarse and fine.
-    let fibre = (0.94 + 0.12 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372)) * (0.96 + 0.08 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85));
+    let fibre = mixf(1.0, (0.94 + 0.12 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372)) * (0.96 + 0.08 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85)), fine);
     let mut c = [0f32; 3];
     for k in 0..3 {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
@@ -412,8 +466,8 @@ mod tests {
             l.seed = 1234;
             for i in 0..500 {
                 let g = [i as f32 * 3.7 - 900.0, (i * 7 % 113) as f32 - 50.0, 140.0 + (i % 19) as f32];
-                let a = sample(&l, g);
-                assert_eq!(a, sample(&l, g));
+                let a = sample(&l, g, (i % 4) as f32);
+                assert_eq!(a, sample(&l, g, (i % 4) as f32));
                 assert!(a.srgb.iter().all(|v| (0.0..=1.0).contains(v)) && (0.02..=1.0).contains(&a.roughness), "{} {a:?}", sp.id);
             }
         }
@@ -422,7 +476,10 @@ mod tests {
     #[test]
     fn every_starter_wood_has_a_species() {
         for id in ["oak-honey", "oak-smoked", "walnut-dark", "maple-light", "cherry-warm", "ash-pale", "birch-cream", "teak-golden"] {
-            assert!(species_look(&format!("starter.wood.{id}")).is_some(), "{id}");
+            let finished = species_look(&format!("starter.wood.{id}")).unwrap();
+            let raw = species_look(&format!("starter.wood.{id}-raw")).unwrap();
+            // Raw timber is matt; a finish gives it a sheen.
+            assert!(raw.roughness[0] > finished.roughness[0] + 0.3, "{id}");
         }
     }
 }

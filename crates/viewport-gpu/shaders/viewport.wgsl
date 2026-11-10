@@ -691,8 +691,11 @@ fn wood_texel(slot: u32, k: u32) -> vec4<f32> {
 /// bits name the body's wood record, 0: none).
 fn wooded(i: TOut) -> vec4<f32> {
     let slot = i.h >> 8u;
+    // The pixel's width on the surface, mm (taken before the branch: derivatives need uniform
+    // control flow).
+    let seen = length(fwidth(i.wp));
     if (slot == 0u) { return i.c; }
-    let w = wood_sample(slot, wood_grain(slot, i.wp));
+    let w = wood_sample(slot, wood_grain(slot, i.wp), seen * length(wood_texel(slot, 6u).xyz));
     return vec4<f32>(w.rgb, i.c.a);
 }
 

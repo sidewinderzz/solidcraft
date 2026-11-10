@@ -162,6 +162,13 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                 let gx = ((b[2] - a[2]) * (cc[1] - a[1]) - (cc[2] - a[2]) * (b[1] - a[1])) / area;
                 let gy = ((cc[2] - a[2]) * (b[0] - a[0]) - (b[2] - a[2]) * (cc[0] - a[0])) / area;
                 let tri_slope = gx.hypot(gy) as f32;
+                // A pixel's width on this triangle, mm, as the GPU's `length(fwidth(world))`.
+                let seen = {
+                    let (e1, e2) = (wp[1] - wp[0], wp[2] - wp[0]);
+                    let dx = (e1 * (cc[1] - a[1]) - e2 * (b[1] - a[1])) * (1.0 / area);
+                    let dy = (e2 * (b[0] - a[0]) - e1 * (cc[0] - a[0])) * (1.0 / area);
+                    Vec3::new(dx.x.abs() + dy.x.abs(), dx.y.abs() + dy.y.abs(), dx.z.abs() + dy.z.abs()).len()
+                };
                 for y in y0 as usize..=y1 as usize {
                     for x in x0 as usize..=x1 as usize {
                         let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
@@ -203,7 +210,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             let n = (ns[0] * p0 + ns[1] * p1 + ns[2] * p2).normalized().unwrap_or(Vec3::Z);
                             // Wood: its colour at this point of the body.
                             let base = match wood {
-                                Some(w) => w.sample(wp[0] * p0 + wp[1] * p1 + wp[2] * p2).srgb.map(f64::from),
+                                Some(w) => w.sample_seen(wp[0] * p0 + wp[1] * p1 + wp[2] * p2, seen).srgb.map(f64::from),
                                 None => base,
                             };
                             // A see-through body has no cut face: the interior already shows.
