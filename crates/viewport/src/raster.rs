@@ -133,6 +133,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             for (ti, t) in m.triangles.iter().enumerate() {
                 let face = m.tri_face.get(ti).copied();
                 let base = sm.face_colors.iter().find(|(f, _)| Some(*f) == face).map_or(body, |(_, c)| c.f());
+                let wood = sm.wood_at(face);
                 let wp = t.map(|k| m.positions.get(k as usize).copied().unwrap_or_default());
                 // Seen from inside: where a section cuts a solid body open, and the far side of
                 // a see-through one (drawn in the pass before its near side).
@@ -200,6 +201,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 }
                             }
                             let n = (ns[0] * p0 + ns[1] * p1 + ns[2] * p2).normalized().unwrap_or(Vec3::Z);
+                            // Wood: its colour at this point of the body.
+                            let base = match wood {
+                                Some(w) => w.sample(wp[0] * p0 + wp[1] * p1 + wp[2] * p2).srgb.map(f64::from),
+                                None => base,
+                            };
                             // A see-through body has no cut face: the interior already shows.
                             let cut = !pass.glass() && scene.clip.is_some() && inside;
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
@@ -447,6 +453,8 @@ mod tests {
             opacity: front_opacity,
             closed: true,
             hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
         };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],

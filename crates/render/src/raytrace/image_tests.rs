@@ -19,6 +19,7 @@ fn emission_fixture(reverse: bool) -> (ProductScene, ImageRequest, RaytraceOptio
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         });
     }
     let bounds = meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds()));
@@ -98,7 +99,7 @@ fn emission_survives_face_reflectance_override_without_changing_captured_geometr
     let (mut scene, request, options) = emission_fixture(false);
     let original = scene.meshes[0].mesh.clone();
     let baseline = emission_png(scene.clone(), request.clone(), options.clone());
-    scene.meshes[0].faces.push(crate::FaceAppearance { transmission: None, face: 0, color: [0; 3], opacity: 1.0, surface: None });
+    scene.meshes[0].faces.push(crate::FaceAppearance { transmission: None, face: 0, color: [0; 3], opacity: 1.0, surface: None, wood: None });
     assert_eq!(baseline, emission_png(scene.clone(), request, options));
     assert!(std::sync::Arc::ptr_eq(&original, &scene.meshes[0].mesh));
     assert_eq!(scene.meshes[0].faces[0].color, [0; 3]);
@@ -387,6 +388,7 @@ fn actual_png_has_analytic_lit_and_cast_shadow_pixels() {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }
     }
     let meshes = vec![plane(0.0, -20.0, 20.0), plane(5.0, -5.0, 5.0)];
@@ -446,6 +448,7 @@ fn triangle_task(cancel: CancelToken) -> ImageTask {
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds,
     };
@@ -477,7 +480,7 @@ fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
     }
     let count = positions.len();
     let mesh = solidcraft_geom::Mesh { positions, normals: vec![Vec3::Z; count], triangles, tri_face, ..Default::default() };
-    let look = |face: u32, color: [u8; 3]| crate::FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None };
+    let look = |face: u32, color: [u8; 3]| crate::FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None, wood: None };
     let mut faces: Vec<_> = (0..columns * rows).step_by(2).map(|face| look(face, [face as u8 * 8, 100, 200])).collect();
     // Later duplicates never replace the first entry for a face.
     faces.extend([look(2, [1, 2, 3]), look(4, [4, 5, 6])]);
@@ -492,6 +495,7 @@ fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
             opacity: 1.0,
             surface: None,
             faces,
+            wood: None,
         }],
         bounds,
     };
@@ -693,6 +697,7 @@ fn reflected_hit_adds_surface_emission_with_the_current_path_throughput() {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(base_color, 1.0, 0.1, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         },
         crate::ProductMesh {
             transmission: None,
@@ -702,6 +707,7 @@ fn reflected_hit_adds_surface_emission_with_the_current_path_throughput() {
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         },
     ];
     let bounds = meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds()));
@@ -761,6 +767,7 @@ fn procedural_effects_change_completed_pngs_independently_and_zero_is_byte_ident
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(0.7, 0.5, 0.3), 1.0, 0.4, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let effect = SurfaceEffect {
@@ -838,6 +845,7 @@ fn surface_consumer_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(0.7, 0.5, 0.3), 1.0, 0.4, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let options = RaytraceOptions {
@@ -959,6 +967,7 @@ fn surface_at_thirty_two_binding_scan() -> ImageTask {
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         });
         effects.push(SurfaceEffect { body: name, frame: Default::default(), repeat_mm: [20.0; 3], roughness_amplitude: 0.1, bump_amplitude_mm: 0.0 });
     }
@@ -1059,6 +1068,7 @@ fn reflected_surface_effect_uses_changed_shading_and_resets_before_emitting_seco
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(0.2, 0.5, 0.75), 1.0, 0.1, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         },
         crate::ProductMesh {
             transmission: None,
@@ -1068,6 +1078,7 @@ fn reflected_surface_effect_uses_changed_shading_and_resets_before_emitting_seco
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         },
     ];
     let bounds = meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds()));
@@ -1237,6 +1248,7 @@ fn optical_sheet(name: &str, x: f64, z: f64) -> crate::ProductMesh {
         opacity: 1.0,
         surface: None,
         faces: Vec::new(),
+        wood: None,
     }
 }
 
@@ -1569,7 +1581,7 @@ fn captured_clear_coat_keeps_direct_shading_but_refuses_unmatched_cpu_transport(
     request.raytrace = Some(options.clone());
     assert!(admit(&scene, &request, &options).unwrap_err().message.contains("clear-coat transport"));
     scene.meshes[0].surface = None;
-    scene.meshes[0].faces.push(crate::FaceAppearance { face: 0, color: [255; 3], opacity: 1.0, surface: Some(surface), transmission: None });
+    scene.meshes[0].faces.push(crate::FaceAppearance { face: 0, color: [255; 3], opacity: 1.0, surface: Some(surface), transmission: None, wood: None });
     assert!(admit(&scene, &request, &options).unwrap_err().message.contains("clear-coat transport"));
 }
 
@@ -2224,6 +2236,7 @@ fn denoise_optical_plane(name: &str, z: f64, color: Vec3) -> crate::ProductMesh 
         opacity: 1.0,
         faces: Vec::new(),
         transmission: None,
+        wood: None,
     }
 }
 fn denoise_optical_fixture(boundary: Option<job::DielectricBoundary>, path: bool) -> (ProductScene, ImageRequest, RaytraceOptions) {
@@ -2583,6 +2596,7 @@ fn mapped_wood_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
             surface: Some(surface),
             transmission: None,
             faces: vec![],
+            wood: None,
         }],
     };
     // Original diagnostic grain: alternating opaque dark/light fibres with known mean.
@@ -2661,6 +2675,7 @@ fn cpu_wood_scalar_face_override_suppresses_inherited_body_maps() {
         opacity: 1.,
         surface: Some(OpaqueSurface::new(Vec3::new(0.2, 0.3, 0.4), 0., 0.7, 1.).unwrap()),
         transmission: None,
+        wood: None,
     });
     let mapped = mapped_png(scene.clone(), request.clone(), options.clone(), 1);
     request.textures = None;

@@ -1275,6 +1275,42 @@ fn push_block(
 }
 
 /// Write a body's colour into the stable arena and into the scene palette being built from it.
+/// Procedural wood grain on a body's palette entries: its body and instance entries and the
+/// faces without looks of their own take its own look's grain; a face whose own look has grain
+/// takes that. The records go into the scene's palette only (they are rebuilt with the scene,
+/// so a changed body gets its grain frame worked out again).
+fn body_wood(
+    doc: &solidcraft_engine::doc::Document,
+    b: &solidcraft_engine::doc::ModelBody,
+    palette: &mut std::sync::Arc<crate::gpu::Palette>,
+    slots: &crate::scene_palette::BodySlots,
+    face_looks: &std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
+) {
+    let own = doc.model_body_wood(b);
+    let has_face_grain = face_looks.values().any(|l| l.grain.is_some());
+    if own.is_none() && !has_face_grain {
+        return;
+    }
+    let palette = std::sync::Arc::make_mut(palette);
+    if let Some(shade) = own
+        && let Some(record) = palette.add_wood(&shade)
+    {
+        palette.set_wood(slots.body, Some(record));
+        palette.set_wood(slots.instance, Some(record));
+        for f in (0..b.body.face_count()).filter(|f| !face_looks.contains_key(f)) {
+            palette.set_wood(slots.face(f), Some(record));
+        }
+    }
+    let mut made: Vec<(&solidcraft_engine::doc::appearance::Look, crate::gpu::PaletteIndex)> = Vec::new();
+    for (f, look) in face_looks.iter().filter(|(_, l)| l.grain.is_some()) {
+        let record = match made.iter().find(|(l, _)| *l == look) {
+            Some((_, r)) => Some(*r),
+            None => doc.look_wood(b, look).and_then(|shade| palette.add_wood(&shade)).inspect(|r| made.push((look, *r))),
+        };
+        palette.set_wood(slots.face(*f), record);
+    }
+}
+
 fn set_palette_color(
     arena: &mut crate::scene_palette::PaletteArena,
     palette: &mut std::sync::Arc<crate::gpu::Palette>,
@@ -1726,6 +1762,9 @@ fn body_scene(
             set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
             face_colors.push(slot);
             face_classes.push(class);
+        }
+        if !faded && s.colored_components.is_none() {
+            body_wood(&s.doc, b, &mut sc.palette, &slots, face_looks);
         }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);

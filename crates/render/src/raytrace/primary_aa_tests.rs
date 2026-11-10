@@ -240,6 +240,7 @@ fn progressive_area_fixture(samples: u32, led: bool) -> ImageTask {
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::new(0.8, 0.6, 0.4), 0.0, 0.7, 1.5).unwrap()),
         faces: Vec::new(),
+        wood: None,
     };
     let mut options = RaytraceOptions {
         threads: 1,
@@ -388,6 +389,7 @@ fn fixture(samples: u8, r: u8, left: Option<bool>) -> ImageTask {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::ZERO, 1.0, 1.0, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }]
     } else {
         Vec::new()
@@ -3001,6 +3003,7 @@ mod adaptive_cpu_images {
                 opacity: 1.0,
                 surface: Some(OpaqueSurface::new(Vec3::ZERO, 1.0, 1.0, 1.5).unwrap()),
                 faces: Vec::new(),
+                wood: None,
             }],
         };
         let options = RaytraceOptions {
@@ -3906,6 +3909,7 @@ fn cpu_glass_vertical_sheet_fixture(samples: u32, depth: u8) -> ImageTask {
         opacity: 1.0,
         surface: None,
         faces: vec![],
+        wood: None,
     };
     scene.meshes.push(sheet);
     scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds()));
@@ -4065,6 +4069,7 @@ fn cpu_general_glass_keeps_an_opaque_surface_at_its_exit_instead_of_skipping_the
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 1.0, 1.0).unwrap()),
         faces: vec![],
+        wood: None,
     };
     scene.meshes.push(receiver);
     let mut options = base.options.clone();
@@ -4163,6 +4168,7 @@ fn cpu_inside_glass_fixture(samples: u32, nested: bool, endpoint: u8, lens: Opti
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 1.0, 1.0).unwrap()),
             faces: vec![],
+            wood: None,
         });
         options.environment = None;
         if endpoint == 1 {
@@ -5070,6 +5076,7 @@ fn cpu_volume_fixture(samples: u32, depth: u8, perspective: bool, opaque: bool, 
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 1.0, 1.0).unwrap()),
         faces: vec![],
+        wood: None,
     };
     let scene =
         if opaque { ProductScene { bounds: body.mesh.bounds(), meshes: vec![body] } } else { ProductScene { bounds: Aabb3::EMPTY, meshes: vec![] } };
@@ -6334,6 +6341,7 @@ fn cpu_directional_caustic_fixture(photons: u32, radius_mm: f64) -> ImageTask {
         opacity: 1.0,
         faces: vec![],
         transmission: None,
+        wood: None,
     });
     scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
     let mut options = original.options.clone();

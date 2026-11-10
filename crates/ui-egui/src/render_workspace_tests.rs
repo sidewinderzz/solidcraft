@@ -4605,6 +4605,7 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
         surface: Some(OpaqueSurface::new(Vec3::new(0.4, 0.2, 0.1), 0.0, 0.4, 1.5).unwrap()),
         transmission: None,
         faces: Vec::new(),
+        wood: None,
     };
     let scene = ProductScene { meshes: vec![body], bounds: mesh.bounds() };
     assert!(preview_upload_plan(&scene, 128 * 1024 * 1024).is_err());
@@ -8146,6 +8147,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
             surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds: Aabb3::EMPTY,
     };

@@ -199,6 +199,7 @@ mod tests {
                 surface: None,
                 transmission: Some(solidcraft_render::transmission::Transmission::new(solidcore_record::Vec3::ZERO, Some(1.)).unwrap()),
                 faces: vec![],
+                wood: None,
             }],
         };
         let value =
