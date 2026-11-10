@@ -56,11 +56,13 @@ pub struct AppearanceAssignParams {
     #[serde(default)]
     pub pbr: Option<PbrParam>,
     /// Procedural 3D wood grain (the starter woods carry theirs): `{species, axis, seed, scale,
-    /// ring_spacing_mm, figure}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
+    /// ring_spacing_mm, figure, pith_offset_mm}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
     /// maple-light, cherry-warm, ash-pale, birch-cream or teak-golden. `axis`: `"long"` (default:
     /// along each body's longest direction), `"X"`, `"Y"`, `"Z"` or `[x, y, z]`. `seed`: 0…16777215
     /// (default: from each body's name). `scale`: 0.05…20 (1: real size). `ring_spacing_mm`:
-    /// 0.2…50. `figure`: 0…5 (how much the rings wander). `true`: the species' defaults; `null`
+    /// 0.2…50. `figure`: 0…5 (how much the rings wander). `pith_offset_mm`: where the log's centre
+    /// lies from the board's middle, `[across width, across thickness]` or one number (across
+    /// the thickness), ±100000 mm; default `[0, 0]`, rings centred on the board. `true`: the species' defaults; `null`
     /// removes the grain.
     #[serde(default)]
     pub grain: Option<Value>,
