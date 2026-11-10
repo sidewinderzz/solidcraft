@@ -263,22 +263,29 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fp: f32) -> WoodSample {
     let late = mixf(0.25, smoothstep(0.55, 0.95, t), rings) * l.contrast;
     let q = [g[0], y, z];
     // Colour zones: broad bands of the lighter, warmer tone that run the length of a board.
-    let zone = smoothstep(0.35, 0.8, noise(scaled(q, 0.0015, 0.05), s ^ 0x1656_67b1));
+    // The same point by its ring: along the grain, out from the pith, and around it. Colour
+    // belongs to the rings, so its zones and streaks bend with them (the cathedral arches).
+    let around = 20.0 * y / (r + 1.0);
+    let zone = smoothstep(0.35, 0.8, noise([g[0] * 0.0015, r * 0.05, around * 0.05], s ^ 0x1656_67b1));
     // Dark streaks: long along the grain, a few mm across.
-    let streak = smoothstep(0.6, 0.92, noise(scaled(q, 0.004, 0.25), s ^ 0xc2b2_ae35)) * l.streaks;
+    let streak = smoothstep(0.6, 0.92, noise([g[0] * 0.004, r * 0.25, around * 0.03], s ^ 0xc2b2_ae35)) * l.streaks;
     // Pores: the cut vessels, short dark dashes along the grain (dots on end grain), mostly in
     // the earlywood.
-    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.08, 1.3), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * fine;
+    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.1, 1.8), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * fine;
     // Ray flecks: short pale ticks.
     let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * fine;
     // Fibres along the grain, coarse and fine.
-    let fibre = mixf(1.0, (0.94 + 0.12 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372)) * (0.96 + 0.08 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85)), fine);
+    let fibre = mixf(1.0, (0.92 + 0.16 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372)) * (0.94 + 0.12 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85)), fine);
+    // The crisp dark line that ends each year's growth.
+    let line = smoothstep(0.88, 0.97, t) * rings * l.contrast;
+    // Ripple: faint bands across the grain, where the fibres dip and rise.
+    let ripple = 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab);
     let mut c = [0f32; 3];
     for k in 0..3 {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
-        c[k] = (flecked * (1.0 - 0.55 * pore) * fibre).clamp(0.0, 1.0);
+        c[k] = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.25 * line) * fibre * ripple).clamp(0.0, 1.0);
     }
     let roughness = (mixf(l.roughness[0], l.roughness[1], late / l.contrast.max(1e-3)) + 0.08 * pore).clamp(0.02, 1.0);
     WoodSample { srgb: c, roughness }
