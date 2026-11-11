@@ -1656,6 +1656,10 @@ pub const ELEMENTS: &[Element] = &[
     element!("color_swatch", |ui, _| {
         color_swatch(ui, ui.scope_id().with("swatch"), Tokens::get().accent, true, "Sample", 1);
     }),
+    element!("picture_swatch", |ui, _| {
+        let picture = ui.ctx().load_texture("gallery_swatch", egui::ColorImage::filled([4, 4], Tokens::get().accent), egui::TextureOptions::LINEAR);
+        picture_swatch(ui, ui.scope_id().with("picture_swatch"), &picture, true, "Sample", 1);
+    }),
     element!("swatch_grid", |ui, _| {
         swatch_grid(ui, &[1, 2, 3], |ui, n| {
             color_swatch(ui, ui.scope_id().with(n), Tokens::get().accent, true, "Sample", *n);

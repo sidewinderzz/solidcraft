@@ -24,6 +24,8 @@ pub struct Look {
     pub color: [u8; 3],
     pub opacity: f64,
     pub pbr: Option<PbrParameters>,
+    /// A wood's grain settings, as `appearance.assign` takes them.
+    pub grain: Option<Value>,
 }
 
 /// Transient library admission metadata, never saved as a second catalog.
@@ -70,6 +72,7 @@ fn library_look(x: &Value) -> Option<Look> {
         color: parse_color(x.get("color")?)?,
         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
+        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
     })
 }
 
@@ -84,6 +87,8 @@ fn choose_look(k: &mut Ap, look: &Look) -> Result<(), String> {
     k.pbr = look.pbr;
     k.look = Some(look.name.clone());
     k.preset_id = look.preset.as_ref().map(|p| p.id.clone());
+    // A wood starts from its species' own grain.
+    k.grain = look.grain.clone().or_else(|| wood_species(look).map(|species| json!({"species": species})));
     k.note = look.preset.as_ref().map(|p| p.preview_note.clone()).filter(|note| !note.is_empty());
     k.remove_override = false;
     Ok(())
@@ -113,7 +118,7 @@ fn matches_library_filter(look: &Look, category: Option<&str>, query: &str, only
 /// Built-in looks, used until the engine offers a library (`appearance.library`).
 pub(crate) fn builtin() -> Vec<Look> {
     let l =
-        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { preset: None, name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None };
+        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { preset: None, name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None, grain: None };
     vec![
         l("Metal", "Aluminum - Satin", [196, 199, 204], 1.0),
         l("Metal", "Steel - Brushed", [160, 164, 170], 1.0),
@@ -193,6 +198,10 @@ pub struct Ap {
     pub applied: Option<Value>,
     /// What the last drop or Apply did.
     pub note: Option<String>,
+    /// A wood's grain settings, as `appearance.assign` takes them (`None`: not a wood).
+    pub grain: Option<Value>,
+    /// Move grain: a drag on a wooden body in the view slides its grain (`grain_drag`).
+    pub move_grain: bool,
 }
 
 /// The dialog for the Appearance command.
@@ -226,6 +235,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 color: existing.as_ref().map_or([196, 199, 204], |l| l.color),
                 opacity: existing.as_ref().map_or(1.0, |l| l.opacity),
                 pbr: existing.as_ref().and_then(|l| l.pbr),
+                grain: existing.as_ref().and_then(|l| l.grain.as_ref()).and_then(|g| serde_json::to_value(g).ok()),
+                move_grain: false,
                 look: existing.map(|l| l.name),
                 category: 0,
                 search: String::new(),
@@ -286,7 +297,7 @@ pub fn commands(k: &Ap, inputs: &[SelInput]) -> Vec<(String, Value)> {
     p.map(|p| vec![("appearance.assign".to_string(), p)]).unwrap_or_default()
 }
 
-pub(super) fn selected_params(k: &Ap, items: &[Sel]) -> Option<Value> {
+pub(crate) fn selected_params(k: &Ap, items: &[Sel]) -> Option<Value> {
     let mut p = if let Some(component) = &k.component {
         Some(json!({"components": [component], "color": hex(k.color), "opacity": k.opacity, "name": k.look}))
     } else {
@@ -299,6 +310,9 @@ pub(super) fn selected_params(k: &Ap, items: &[Sel]) -> Option<Value> {
             object.remove("name");
         }
         p["appearance"] = json!(id);
+    }
+    if let Some(grain) = &k.grain {
+        p["grain"] = grain.clone();
     }
     Some(p)
 }
@@ -316,6 +330,7 @@ pub(crate) fn without_look(mut p: Value) -> Value {
         obj.remove("color");
         obj.remove("opacity");
         obj.remove("pbr");
+        obj.remove("grain");
     }
     p
 }
@@ -348,6 +363,7 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
                         color: parse_color(x.get("color")?)?,
                         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
+        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
                     },
                     count(x, "bodies") + count(x, "faces") + count(x, "components"),
                 ))
@@ -356,7 +372,15 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
     }
     let mut out: Vec<(Look, usize)> = Vec::new();
     for l in app.session.doc.appearances.bodies.values() {
-        let look = Look { preset: None, name: l.name.clone(), category: "In This Design".into(), color: l.color, opacity: l.opacity, pbr: l.pbr };
+        let look = Look {
+            preset: None,
+            name: l.name.clone(),
+            category: "In This Design".into(),
+            color: l.color,
+            opacity: l.opacity,
+            pbr: l.pbr,
+            grain: l.grain.as_ref().and_then(|g| serde_json::to_value(g).ok()),
+        };
         match out.iter_mut().find(|(x, _)| *x == look) {
             Some(e) => e.1 += 1,
             None => out.push((look, 1)),
@@ -374,6 +398,110 @@ pub(crate) fn replacement_library(app: &mut SolveApp) -> Vec<Look> {
         }
     }
     looks
+}
+
+/// A wood's grain rows: its rings, pores and streaks, glued-up boards, and where the grain lies
+/// in the body. True when a setting was let go and should show on the picked objects.
+fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
+    let Some(mut value) = k.grain.take() else { return false };
+    let mut apply = false;
+    if let Some(grain) = value.as_object_mut() {
+        let species = grain.get("species").and_then(Value::as_str).and_then(solidcraft_viewport::wood::species_look);
+        let ended = |response: &egui::Response, ui: &egui::Ui| {
+            response.drag_stopped() || response.lost_focus() || response.changed() && !response.has_focus() && !ui.input(|i| i.pointer.any_down())
+        };
+        for (label, key, default, range) in [
+            ("appearance.grain.ring_spacing", "ring_spacing_mm", species.map_or(3.0, |l| f64::from(l.ring_mm)), 0.5..=20.0),
+            ("appearance.grain.contrast", "contrast", 1.0, 0.0..=3.0),
+            ("appearance.grain.figure", "figure", 1.0, 0.0..=5.0),
+            ("appearance.grain.pores", "pores", species.map_or(0.5, |l| f64::from(l.pores)), 0.0..=1.0),
+            ("appearance.grain.streaks", "streaks", species.map_or(0.5, |l| f64::from(l.streaks)), 0.0..=1.0),
+        ] {
+            let mut v = grain.get(key).and_then(Value::as_f64).unwrap_or(default);
+            let response = ui_kit::row(ui, app.tr(label), |ui| ui_kit::slider(ui, &mut v, range, Default::default()));
+            if response.changed() {
+                grain.insert(key.into(), json!(v));
+            }
+            apply |= ended(&response, ui);
+        }
+        // Glued-up stock: the body shows as boards of this size glued together.
+        let stock = grain.get("stock_mm").and_then(Value::as_array).map(|a| [a.first().and_then(Value::as_f64).unwrap_or(150.0), a.get(1).and_then(Value::as_f64).unwrap_or(0.0)]);
+        let mut glued = stock.is_some();
+        if ui_kit::row(ui, app.tr("appearance.grain.glued"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.glued_on"), &mut glued)).changed() {
+            if glued {
+                grain.insert("stock_mm".into(), json!([150.0, 0.0]));
+            } else {
+                grain.remove("stock_mm");
+            }
+            apply = true;
+        } else if let Some([mut width, mut length]) = stock {
+            let w = ui_kit::row(ui, app.tr("appearance.grain.stock_width"), |ui| ui_kit::scalar_field(ui, &mut width, 5.0..=5000.0));
+            let l = ui_kit::row(ui, app.tr("appearance.grain.stock_length"), |ui| ui_kit::scalar_field(ui, &mut length, 0.0..=50_000.0));
+            if w.changed() || l.changed() {
+                // A length is none (full-length boards) or at least 50 mm.
+                let length = if length > 0.0 { length.max(50.0) } else { 0.0 };
+                grain.insert("stock_mm".into(), json!([width, length]));
+            }
+            apply |= ended(&w, ui) || ended(&l, ui);
+        }
+        // Where the grain lies in the body: dragged in the view, or put back to the middle.
+        let mut centre = false;
+        ui_kit::row(ui, app.tr("appearance.grain.position"), |ui| {
+            ui_kit::checkbox(ui, app.tr("appearance.grain.move"), &mut k.move_grain);
+            centre = ui_kit::button(ui, app.tr("appearance.grain.centre"), ui_kit::Button::Normal).clicked();
+        });
+        if centre {
+            grain.remove("pith_offset_mm");
+            grain.remove("shift_mm");
+            apply = true;
+        }
+    }
+    k.grain = Some(value);
+    apply
+}
+
+/// The wood species a look shows (its starter recipe's, by id or by name), if it is a wood.
+fn wood_species(look: &Look) -> Option<&'static str> {
+    let named = |id: &str| solidcraft_viewport::wood::SPECIES.iter().find(|s| s.id == id).map(|s| s.id);
+    if let Some(species) = look.grain.as_ref().and_then(|g| g.get("species")).and_then(Value::as_str) {
+        return named(species);
+    }
+    let preset = solidcraft_engine::doc::appearance_pack::find(look.preset.as_ref().map_or(look.name.as_str(), |p| p.id.as_str()))?;
+    named(preset.id.strip_prefix("starter.wood.")?)
+}
+
+/// A small picture of a wood's grain for its swatch: a flat-sawn patch 30 mm across, drawn by
+/// the same function that draws the wood on a body. Made once per species.
+fn wood_picture(ctx: &egui::Context, species: &'static str) -> Option<egui::TextureHandle> {
+    let id = egui::Id::unique(("wood_swatch", species));
+    if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(texture);
+    }
+    let mut look = solidcraft_viewport::wood::species_look(species)?;
+    look.seed = 7;
+    const SIDE: usize = 64;
+    let mm = 30.0 / SIDE as f32;
+    let mut pixels = Vec::with_capacity(SIDE * SIDE * 4);
+    for y in 0..SIDE {
+        for x in 0..SIDE {
+            // Across the patch the grain runs upward; the cut passes 25 mm from the pith, so
+            // the rings arch.
+            let g = [900.0 - y as f32 * mm, x as f32 * mm + 4.0, 25.0];
+            let c = solidcraft_viewport::wood::sample(&look, g, [0.0, 2.0 * mm, 0.0], [2.0 * mm, 0.0, 0.0]).srgb;
+            pixels.extend([(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8, 255]);
+        }
+    }
+    let texture = ctx.load_texture(format!("wood_swatch:{species}"), egui::ColorImage::from_rgba_unmultiplied([SIDE, SIDE], &pixels), egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
+    Some(texture)
+}
+
+/// A look's swatch: its colour, or for a wood a picture of its grain.
+fn look_swatch(ui: &mut egui::Ui, id: egui::Id, look: &Look, selected: bool, tip: &str) -> egui::Response {
+    match wood_species(look).and_then(|species| wood_picture(ui.ctx(), species)) {
+        Some(picture) => ui_kit::picture_swatch(ui, id, &picture, selected, tip, look.clone()),
+        None => ui_kit::color_swatch(ui, id, c32(look.color, look.opacity), selected, tip, look.clone()),
+    }
 }
 
 fn c32(c: [u8; 3], opacity: f64) -> Color32 {
@@ -449,6 +577,33 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         }
     }
     let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+    // A wooden body picked before any look is chosen: the dialog takes up its look, so its
+    // grain can be adjusted and moved as it is.
+    if k.grain.is_none()
+        && k.look.is_none()
+        && k.applied.is_none()
+        && let Some(Sel::Body { name }) = picked.first()
+        && let Some(look) = crate::open_meshing::session_world(&app.session).body(name).and_then(|b| app.session.doc.model_body_look(b))
+        && let Some(grain) = look.grain.as_ref().and_then(|g| serde_json::to_value(g).ok())
+    {
+        k.color = look.color;
+        k.opacity = look.opacity;
+        k.pbr = look.pbr;
+        k.look = Some(look.name);
+        k.grain = Some(grain);
+    }
+    if grain_rows(app, ui, k)
+        && let Some(p) = selected_params(k, &picked)
+    {
+        // A grain setting shows on the picked objects as soon as it is let go.
+        match app.run("appearance.assign", p.clone()) {
+            Ok(_) => {
+                k.applied = Some(p);
+                k.remove_override = false;
+            }
+            Err(e) => k.note = Some(e),
+        }
+    }
     ui.horizontal_wrapped(|ui| {
         let has_target = !picked.is_empty() || k.component.is_some();
         if ui_kit::button(ui, "Apply to selection", ui_kit::Button::Enabled(has_target)).clicked()
@@ -485,13 +640,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         ui_kit::section_count(ui, "in_design", "In This Design", true, Some(used.len()), |ui| {
             let items: Vec<_> = used.iter().enumerate().collect();
             ui_kit::swatch_grid(ui, &items, |ui, (i, (look, n))| {
-                if ui_kit::color_swatch(
+                if look_swatch(
                     ui,
                     egui::Id::unique(("ap_used", *i)),
-                    c32(look.color, look.opacity),
+                    look,
                     k.color == look.color && k.opacity == look.opacity && k.pbr == look.pbr,
                     &format!("{} · {n} item(s)", look.name),
-                    look.clone(),
                 )
                 .clicked()
                     && let Err(error) = choose_look(k, look)
@@ -535,7 +689,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
             |p| format!("{}\n{}\n{}", l.name, p.preview_note, p.requirements.join(", ")),
         );
         ui.add_enabled_ui(available, |ui| {
-            let response = ui_kit::color_swatch(ui, egui::Id::unique(("ap_lib", *i)), c32(l.color, l.opacity), picked_look, &tip, (*l).clone());
+            let response = look_swatch(ui, egui::Id::unique(("ap_lib", *i)), l, picked_look, &tip);
             if let Some(preset) = &l.preset {
                 crate::scenario::publish_handle(&format!("appearance:preset:{}", preset.id), response.rect.center());
             }
@@ -565,6 +719,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
                     object.remove("name");
                 }
                 p["appearance"] = json!(id);
+            }
+            if let Some(grain) = &k.grain {
+                p["grain"] = grain.clone();
             }
             k.note = Some(match app.run("appearance.assign", p.clone()) {
                 Ok(_) => {

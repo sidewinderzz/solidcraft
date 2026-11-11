@@ -654,6 +654,7 @@ impl View {
                 (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
             })
         };
+        let wood = look.map_or(body.wood, |look| look.wood.as_deref().copied());
         if surface.is_some() && opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
@@ -707,6 +708,7 @@ impl View {
             opacity,
             surface,
             paint,
+            wood,
             centre_depth,
             area,
             bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
@@ -744,6 +746,7 @@ struct Triangle {
     surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     /// Off for a depth-only body.
     paint: bool,
+    wood: Option<solidcraft_viewport::wood::WoodShade>,
     centre_depth: f64,
     area: f64,
     /// Whole-canvas sample bounds `[x0, x1, y0, y1]` (inclusive), narrowed to the tile drawn.
@@ -1288,20 +1291,29 @@ fn raster_pixel(
         return Ok(());
     }
     let n = t.normals.iter().zip(weights).fold(Vec3::ZERO, |v, (n, w)| v + *n * (w / sum)).normalized().unwrap_or(Vec3::Z);
-    let colour = if let Some(surface) = t.surface {
-        let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
+    let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
+    // Wood: its colour and roughness at this point.
+    let surface = match (t.wood.as_ref(), t.surface) {
+        (Some(wood), Some(surface)) => Some(crate::product::wooded_surface(wood, surface, world)),
+        (_, surface) => surface,
+    };
+    let plain = match t.wood.as_ref() {
+        Some(wood) => wood.sample(world).srgb.map(|v| decode((v.clamp(0.0, 1.0) * 255.0).round() as u8)),
+        None => t.colour,
+    };
+    let colour = if let Some(surface) = surface {
         let view = eye.map_or(back, |eye| eye - world);
         let radiance = crate::studio::shade_weighted(surface, n, view, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
-        let [r, g, b] = t.colour;
+        let [r, g, b] = plain;
         let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        solidcraft_viewport::shade(n, back, t.colour)
+        solidcraft_viewport::shade(n, back, plain)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

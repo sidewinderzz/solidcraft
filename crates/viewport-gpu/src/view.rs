@@ -64,12 +64,16 @@ pub struct Palette {
     stable_len: usize,
     /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
     hatches: Vec<u8>,
+    /// Per entry, the rest of its texel's second word: an entry that colours a wooden body, its
+    /// wood record's first entry shifted up 8 bits; a wood record's own texels, their raw bits
+    /// (empty: 0 for every entry).
+    seconds: Vec<u32>,
 }
 
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new() }
+        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new(), seconds: Vec::new() }
     }
 
     /// Where the stable entries end and the per-build interned ones begin.
@@ -149,11 +153,49 @@ impl Palette {
         self.hatches.get(i.0 as usize).and_then(|h| h.checked_sub(1)).map(solidcraft_viewport::hatch::Hatch)
     }
 
+    /// Add a body's wood: its record (`solidcraft_viewport::wood::TEXELS` `vec4`s of `f32`
+    /// bits, two texels each) as entries of their own, after the others and never interned.
+    /// Returns the record's first entry, for [`Palette::set_wood`]; `None` when the palette is
+    /// full.
+    pub fn add_wood(&mut self, shade: &solidcraft_viewport::wood::WoodShade) -> Option<PaletteIndex> {
+        let words: Vec<u32> = shade.texels().iter().flatten().map(|v| v.to_bits()).collect();
+        if self.entries.len() + words.len() / 2 >= MAX_PALETTE {
+            return None;
+        }
+        let first = u32::try_from(self.entries.len()).ok().filter(|i| *i > 0 && *i < 1 << 24)?;
+        self.seconds.resize(self.entries.len(), 0);
+        for pair in words.chunks(2) {
+            let (a, b) = (pair.first().copied().unwrap_or(0), pair.get(1).copied().unwrap_or(0));
+            self.entries.push(a.to_le_bytes());
+            self.seconds.push(b);
+        }
+        Some(PaletteIndex(first))
+    }
+
+    /// Shade entry `i` (a body's colour) with the wood record at `record` ([`Palette::add_wood`]),
+    /// or plain again with `None`.
+    pub fn set_wood(&mut self, i: PaletteIndex, record: Option<PaletteIndex>) -> bool {
+        let at = i.0 as usize;
+        if at >= self.entries.len() {
+            return false;
+        }
+        if self.seconds.len() < self.entries.len() {
+            self.seconds.resize(self.entries.len(), 0);
+        }
+        match self.seconds.get_mut(at) {
+            Some(slot) => {
+                *slot = record.map_or(0, |r| r.0 << 8);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Entry `i` as the shader's `Rg32Uint` texel: the rgba bytes packed little-endian, then
-    /// 1 + its hatch (0: the cap's own).
+    /// 1 + its hatch (0: the cap's own) and its wood record ([`Palette::set_wood`]).
     fn texel(&self, i: usize) -> [u32; 2] {
         let colour = self.entries.get(i).map_or(0, |[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a]));
-        [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0))]
+        [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0)) | self.seconds.get(i).copied().unwrap_or(0)]
     }
 }
 
@@ -2467,7 +2509,7 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
     })
 }
 
-pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
+pub const SHADER: &str = concat!(include_str!("../shaders/viewport.wgsl"), "\n", include_str!("../../viewport/src/wood.wgsl"));
 
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
     const A: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
@@ -2630,10 +2672,11 @@ impl Renderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
-                // The palette: a texture (not a storage buffer), so WebGL2 can draw it.
+                // The palette: a texture (not a storage buffer), so WebGL2 can draw it. The
+                // fragments read wood records from it too.
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,

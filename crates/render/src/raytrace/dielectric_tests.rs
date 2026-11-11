@@ -20,6 +20,7 @@ pub(in crate::raytrace) fn box_body(thickness: f64) -> ProductMesh {
         opacity: 1.0,
         surface: None,
         faces: Vec::new(),
+        wood: None,
     }
 }
 pub(in crate::raytrace) fn scene(body: ProductMesh) -> ProductScene {
@@ -367,6 +368,7 @@ fn actual_oblique_png_selects_the_snell_shifted_colour_target() {
             opacity: 1.0,
             surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(color, 0.0, 1.0, 1.0).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }
     }
     let mut scene = scene(box_body(8.0));
@@ -531,6 +533,7 @@ fn actual_png_brewster_thin_sheet_matches_reflected_energy() {
         opacity: 1.0,
         surface: None,
         faces: Vec::new(),
+        wood: None,
     };
     scene.bounds = scene.bounds.union(&absorber.mesh.bounds());
     scene.meshes.push(absorber);

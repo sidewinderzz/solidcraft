@@ -344,15 +344,15 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
         // cap colour so it reads as a cut, hatched at 45 degrees on screen; by part, toward the
         // body's own hatch colour and at its angle (45 or 135 degrees). With the hatch off
         // (`u.cap.a` 0), plain in the body's own colour.
-        if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
+        if (u.cap.a < 0.5) { return out_color(vec4<f32>(wooded(i).rgb, 1.0)); }
         var tint = u.cap.rgb;
         var turn = 1.0;
-        if (i.h > 0u) {
-            let k = i.h - 1u;
+        if ((i.h & 255u) > 0u) {
+            let k = (i.h & 255u) - 1u;
             tint = u.hatch[min(k >> 1u, 2u)].rgb;
             turn = select(1.0, -1.0, (k & 1u) == 1u);
         }
-        let base = mix(i.c.rgb, tint, 0.35);
+        let base = mix(wooded(i).rgb, tint, 0.35);
         let h = fract((i.pos.x + turn * i.pos.y) / 9.0);
         return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
     }
@@ -625,14 +625,18 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a));
+    return lit_color(i, 1.0, vec4<f32>(wooded(i).rgb + u.tint.rgb, i.c.a));
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a));
+    // A wooden body keeps its grain under the selection colour.
+    let w = wooded(i);
+    var base = u.sel.rgb;
+    if ((i.h >> 8u) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.15); }
+    return lit_color(i, 1.0, vec4<f32>(base, i.c.a));
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
@@ -676,7 +680,28 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
 }
 
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
-    return lit_color(i, visibility, i.c);
+    return lit_color(i, visibility, wooded(i));
+}
+
+/// A wood record's `k`th `vec4` (`solidcraft_viewport::wood::TEXELS`): two palette texels of
+/// `f32` bits from entry `slot` on.
+fn wood_texel(slot: u32, k: u32) -> vec4<f32> {
+    let a = palette_entry(slot + 2u * k);
+    let b = palette_entry(slot + 2u * k + 1u);
+    return vec4<f32>(bitcast<f32>(a.x), bitcast<f32>(a.y), bitcast<f32>(b.x), bitcast<f32>(b.y));
+}
+
+/// The fragment's colour: its body's, or its wood's at this point (the palette entry's upper
+/// bits name the body's wood record, 0: none).
+fn wooded(i: TOut) -> vec4<f32> {
+    let slot = i.h >> 8u;
+    // The pixel's steps on the surface, mm (taken before the branch: derivatives need uniform
+    // control flow).
+    let dx = dpdx(i.wp);
+    let dy = dpdy(i.wp);
+    if (slot == 0u) { return i.c; }
+    let w = wood_sample(slot, wood_grain(slot, i.wp), wood_step(slot, dx), wood_step(slot, dy));
+    return vec4<f32>(w.rgb, i.c.a);
 }
 
 /// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
