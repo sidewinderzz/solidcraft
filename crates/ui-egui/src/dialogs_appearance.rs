@@ -458,7 +458,7 @@ fn wood_species(look: &Look) -> Option<&'static str> {
 /// A small picture of a wood's grain for its swatch: a flat-sawn patch 30 mm across, drawn by
 /// the same function that draws the wood on a body. Made once per species.
 fn wood_picture(ctx: &egui::Context, species: &'static str) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("wood_swatch", species));
+    let id = egui::Id::unique(("wood_swatch", species));
     if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
