@@ -632,7 +632,11 @@ fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a));
+    // A wooden body keeps its grain under the selection colour.
+    let w = wooded(i);
+    var base = u.sel.rgb;
+    if ((i.h >> 8u) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.3); }
+    return lit_color(i, 1.0, vec4<f32>(base, i.c.a));
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
