@@ -7,8 +7,10 @@
 # "Shelby build". shelby-build is only ever made this way, so feature branches may be rebased
 # freely; change shelby-setup or the feature branches, never shelby-build itself.
 #
-# On a merge conflict the run stops and fails (GitHub emails a failed run), names the branch and
-# files, and shelby-build stays as it was until that branch is rebased onto upstream main.
+# When a branch conflicts with the newest upstream main, the build falls back to the newest
+# upstream commit that every branch already contains (with a warning naming the branch to
+# rebase). Only when that fails too does the run stop and fail (GitHub emails a failed run),
+# leaving shelby-build as it was.
 #
 # Needs the SYNC_TOKEN secret: a fine-grained token for this repository only, with Contents and
 # Workflows read and write. GITHUB_TOKEN can't do this job: GitHub refuses its pushes when
@@ -54,30 +56,45 @@ jobs:
           git fetch --no-tags origin shelby-setup
           git show origin/shelby-setup:.github/shelby-build-branches.txt >"$RUNNER_TEMP/branches.txt"
 
-          echo "### Sync" >>"$GITHUB_STEP_SUMMARY"
-          git checkout -q -B next upstream/main
-          echo "- upstream main: $(git rev-parse --short=9 HEAD)" >>"$GITHUB_STEP_SUMMARY"
-
-          merge() { # <ref> <label>
-            local sha
-            sha=$(git rev-parse --short=9 "$1")
-            if git merge --no-edit -m "Merge $2 ($sha)" "$1"; then
-              echo "- $2: $sha" >>"$GITHUB_STEP_SUMMARY"
-            else
-              files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
-              echo "::error::$2 conflicts with upstream main in: $files. Rebase $2 onto upstream main."
-              echo "- **$2 ($sha): conflict** in $files. Nothing was pushed; rebase $2 onto upstream main." >>"$GITHUB_STEP_SUMMARY"
-              git merge --abort
-              exit 1
-            fi
-          }
-
-          merge origin/shelby-setup shelby-setup
+          branches=()
           while read -r branch; do
             case "$branch" in ''|'#'*) continue ;; esac
             git fetch --no-tags origin "$branch"
-            merge "origin/$branch" "$branch"
+            branches+=("$branch")
           done <"$RUNNER_TEMP/branches.txt"
+
+          # Upstream main, then shelby-setup, then each branch. Returns 1 on the first conflict.
+          rebuild() { # <base> <label>
+            git checkout -q -f -B next "$1"
+            echo "- $2: $(git rev-parse --short=9 HEAD)" >>"$GITHUB_STEP_SUMMARY"
+            local ref label sha files
+            for label in shelby-setup "${branches[@]}"; do
+              ref="origin/$label"
+              sha=$(git rev-parse --short=9 "$ref")
+              if git merge --no-edit -m "Merge $label ($sha)" "$ref"; then
+                echo "  - $label: $sha" >>"$GITHUB_STEP_SUMMARY"
+              else
+                files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+                echo "  - **$label ($sha): conflict** in $files" >>"$GITHUB_STEP_SUMMARY"
+                echo "::warning::$label conflicts with $2 in: $files"
+                git merge --abort
+                return 1
+              fi
+            done
+          }
+
+          echo "### Sync" >>"$GITHUB_STEP_SUMMARY"
+          if ! rebuild upstream/main "upstream main"; then
+            # A branch doesn't merge with the newest upstream yet: build on the newest upstream
+            # commit every branch already contains instead, so the build keeps every branch.
+            base=$(git merge-base --octopus upstream/main origin/shelby-setup "${branches[@]/#/origin/}")
+            echo "Falling back to the upstream commit every branch is based on:" >>"$GITHUB_STEP_SUMMARY"
+            if ! rebuild "$base" "upstream main at $(git rev-parse --short=9 "$base")"; then
+              echo "::error::The branches conflict with each other or with upstream; nothing was pushed."
+              exit 1
+            fi
+            echo "::warning::Built on an older upstream commit; rebase the conflicting branch onto upstream main to catch up."
+          fi
 
           if git fetch --no-tags origin shelby-build 2>/dev/null &&
              [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'origin/shelby-build^{tree}')" ]; then
