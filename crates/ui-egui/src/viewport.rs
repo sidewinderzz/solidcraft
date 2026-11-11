@@ -4257,6 +4257,12 @@ impl<'a> BodiesByName<'a> {
     }
 }
 
+/// Does `b`'s own look have wood grain? Its hovered faces are then outlined rather than filled,
+/// so the grain stays visible under the pointer.
+fn wooden(doc: &solidcraft_engine::doc::Document, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    doc.model_body_look(b).is_some_and(|look| look.grain.is_some())
+}
+
 /// How a whole body is lit: hovered or selected, and in which colour (where the model's own
 /// colour is not kept: placements, and faded or see-through bodies).
 #[derive(Clone, Copy)]
@@ -4705,7 +4711,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     let f = f as usize;
                     hovered_faces.contains(&f) && selected_faces.is_none_or(|s| !s.contains(&f))
                 };
-                mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                // A wooden body keeps its grain under the pointer: its faces are outlined, not
+                // filled with one flat colour.
+                if !wooden(&s.doc, b) {
+                    mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                }
             }
         }
         for (ei, e) in m.edges.iter().enumerate() {
@@ -4726,7 +4736,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let c = body_rgb(app, body);
                 let m = if outlines { shown(b) } else { drawn(b) };
                 let patch = m.surface_patch(*index);
-                if !(outlines && has_pickable_outline(&m)) {
+                if !(outlines && has_pickable_outline(&m)) && !wooden(&s.doc, b) {
                     let lit = shown(b);
                     for &f in &patch {
                         face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
