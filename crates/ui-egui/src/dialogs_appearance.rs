@@ -24,6 +24,8 @@ pub struct Look {
     pub color: [u8; 3],
     pub opacity: f64,
     pub pbr: Option<PbrParameters>,
+    /// A wood's grain settings, as `appearance.assign` takes them.
+    pub grain: Option<Value>,
 }
 
 /// Transient library admission metadata, never saved as a second catalog.
@@ -70,6 +72,7 @@ fn library_look(x: &Value) -> Option<Look> {
         color: parse_color(x.get("color")?)?,
         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
+        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
     })
 }
 
@@ -85,7 +88,7 @@ fn choose_look(k: &mut Ap, look: &Look) -> Result<(), String> {
     k.look = Some(look.name.clone());
     k.preset_id = look.preset.as_ref().map(|p| p.id.clone());
     // A wood starts from its species' own grain.
-    k.grain = wood_species(look).map(|species| json!({"species": species}));
+    k.grain = look.grain.clone().or_else(|| wood_species(look).map(|species| json!({"species": species})));
     k.note = look.preset.as_ref().map(|p| p.preview_note.clone()).filter(|note| !note.is_empty());
     k.remove_override = false;
     Ok(())
@@ -115,7 +118,7 @@ fn matches_library_filter(look: &Look, category: Option<&str>, query: &str, only
 /// Built-in looks, used until the engine offers a library (`appearance.library`).
 pub(crate) fn builtin() -> Vec<Look> {
     let l =
-        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { preset: None, name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None };
+        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { preset: None, name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None, grain: None };
     vec![
         l("Metal", "Aluminum - Satin", [196, 199, 204], 1.0),
         l("Metal", "Steel - Brushed", [160, 164, 170], 1.0),
@@ -360,6 +363,7 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
                         color: parse_color(x.get("color")?)?,
                         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
+        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
                     },
                     count(x, "bodies") + count(x, "faces") + count(x, "components"),
                 ))
@@ -368,7 +372,15 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
     }
     let mut out: Vec<(Look, usize)> = Vec::new();
     for l in app.session.doc.appearances.bodies.values() {
-        let look = Look { preset: None, name: l.name.clone(), category: "In This Design".into(), color: l.color, opacity: l.opacity, pbr: l.pbr };
+        let look = Look {
+            preset: None,
+            name: l.name.clone(),
+            category: "In This Design".into(),
+            color: l.color,
+            opacity: l.opacity,
+            pbr: l.pbr,
+            grain: l.grain.as_ref().and_then(|g| serde_json::to_value(g).ok()),
+        };
         match out.iter_mut().find(|(x, _)| *x == look) {
             Some(e) => e.1 += 1,
             None => out.push((look, 1)),
@@ -450,9 +462,12 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
 
 /// The wood species a look shows (its starter recipe's, by id or by name), if it is a wood.
 fn wood_species(look: &Look) -> Option<&'static str> {
+    let named = |id: &str| solidcraft_viewport::wood::SPECIES.iter().find(|s| s.id == id).map(|s| s.id);
+    if let Some(species) = look.grain.as_ref().and_then(|g| g.get("species")).and_then(Value::as_str) {
+        return named(species);
+    }
     let preset = solidcraft_engine::doc::appearance_pack::find(look.preset.as_ref().map_or(look.name.as_str(), |p| p.id.as_str()))?;
-    let id = preset.id.strip_prefix("starter.wood.")?;
-    solidcraft_viewport::wood::SPECIES.iter().find(|s| s.id == id).map(|s| s.id)
+    named(preset.id.strip_prefix("starter.wood.")?)
 }
 
 /// A small picture of a wood's grain for its swatch: a flat-sawn patch 30 mm across, drawn by
@@ -562,6 +577,21 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         }
     }
     let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+    // A wooden body picked before any look is chosen: the dialog takes up its look, so its
+    // grain can be adjusted and moved as it is.
+    if k.grain.is_none()
+        && k.look.is_none()
+        && k.applied.is_none()
+        && let Some(Sel::Body { name }) = picked.first()
+        && let Some(look) = crate::open_meshing::session_world(&app.session).body(name).and_then(|b| app.session.doc.model_body_look(b))
+        && let Some(grain) = look.grain.as_ref().and_then(|g| serde_json::to_value(g).ok())
+    {
+        k.color = look.color;
+        k.opacity = look.opacity;
+        k.pbr = look.pbr;
+        k.look = Some(look.name);
+        k.grain = Some(grain);
+    }
     if grain_rows(app, ui, k)
         && let Some(p) = selected_params(k, &picked)
     {
