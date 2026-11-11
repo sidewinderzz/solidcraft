@@ -1525,7 +1525,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         var surface_roughness=mapped_surface.roughness;
         let wood_slot=wood_record(captured.optics.w,(u32(captured.interior.z)&2u)!=0u);
         if wood_slot!=0u {
-            let w=wood_sample(wood_slot,wood_grain(wood_slot,shading_position),0.0);
+            let w=wood_sample(wood_slot,wood_grain(wood_slot,shading_position),vec3<f32>(0.0),vec3<f32>(0.0));
             surface_color=select(w.rgb/12.92,pow((w.rgb+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),w.rgb>vec3<f32>(0.04045));
             surface_roughness=w.w;
         }

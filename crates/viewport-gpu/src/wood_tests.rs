@@ -13,8 +13,8 @@ fn wood_texel(slot: u32, k: u32) -> vec4<f32> { return rec[k]; }
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.x;
-    if (i >= arrayLength(&pts)) { return; }
-    out[i] = wood_sample(1u, wood_grain(1u, pts[i].xyz), pts[i].w);
+    if (3u * i >= arrayLength(&pts)) { return; }
+    out[i] = wood_sample(1u, wood_grain(1u, pts[3u * i].xyz), wood_step(1u, pts[3u * i + 1u].xyz), wood_step(1u, pts[3u * i + 2u].xyz));
 }
 "#;
 
@@ -28,11 +28,11 @@ fn board_shade(species: &str) -> WoodShade {
     WoodShade { look, to_grain: wood::frame_for_mesh(&p, &t, Frame::default()).unwrap() }
 }
 
-fn gpu_samples(device: &wgpu::Device, queue: &wgpu::Queue, shade: &WoodShade, points: &[[f32; 4]]) -> Vec<[f32; 4]> {
+fn gpu_samples(device: &wgpu::Device, queue: &wgpu::Queue, shade: &WoodShade, points: &[[[f32; 4]; 3]]) -> Vec<[f32; 4]> {
     let source = format!("{WGSL}\n{PROBE}");
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("wood_probe"), source: wgpu::ShaderSource::Wgsl(source.into()) });
     let record: Vec<f32> = shade.texels().iter().flatten().copied().collect();
-    let flat: Vec<f32> = points.iter().flatten().copied().collect();
+    let flat: Vec<f32> = points.iter().flatten().flatten().copied().collect();
     let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
     let storage = |label, data: &[u8]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: data, usage: wgpu::BufferUsages::STORAGE });
     let rec = storage("rec", &bytes(&record));
@@ -83,19 +83,28 @@ fn the_gpu_wood_matches_the_cpu_wood() {
     };
     eprintln!("GPU: {}", adapter.get_info().name);
     // Points on the board's faces and inside it.
-    let points: Vec<[f32; 4]> = (0..4096)
+    // Points on the board's faces and inside it, each with a pixel's two steps: none, small,
+    // and long ones along and across the grain (a far and a steep view).
+    let points: Vec<[[f32; 4]; 3]> = (0..4096)
         .map(|i| {
             let f = |k: u32, n: f32| ((i as u32).wrapping_mul(k) % 10007) as f32 / 10007.0 * n;
-            [f(7919, 600.0), f(104_729, 100.0), if i % 3 == 0 { 20.0 } else { f(1_299_709, 20.0) }, (i % 5) as f32 * 0.6]
+            let a = (i % 5) as f32 * 0.3;
+            let b = (i % 7) as f32 * 0.9;
+            [[f(7919, 600.0), f(104_729, 100.0), if i % 3 == 0 { 20.0 } else { f(1_299_709, 20.0) }, 0.0], [b, a, 0.0, 0.0], [0.1 * a, 0.0, a, 0.0]]
         })
         .collect();
     for species in wood::SPECIES {
-        let shade = board_shade(species.id);
+        let mut shade = board_shade(species.id);
+        // Half the species as glued-up stock: boards 30 mm wide and 250 mm long.
+        if species.id.len() % 2 == 0 {
+            shade.look.stock = [30.0, 250.0, 4.0];
+        }
         let gpu = gpu_samples(&device, &queue, &shade, &points);
         let mut off = 0;
         let mut worst = 0f32;
         for (p, g) in points.iter().zip(&gpu) {
-            let c = shade.sample_seen(Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64), p[3] as f64);
+            let v = |q: [f32; 4]| Vec3::new(q[0] as f64, q[1] as f64, q[2] as f64);
+            let c = shade.sample_seen(v(p[0]), v(p[1]), v(p[2]));
             let d = (0..3).map(|k| (c.srgb[k] - g[k]).abs()).fold((c.roughness - g[3]).abs(), f32::max);
             if d > 2.0 / 255.0 {
                 off += 1;

@@ -40,6 +40,10 @@ pub struct WoodLook {
     pub roughness: [f32; 2],
     /// Noise seed: two boards of one species differ by their seed.
     pub seed: u32,
+    /// Glued-up stock, in grain mm: the boards' width and length (0: one piece; length 0: full
+    /// length), then where the pith lies from the body's middle across its width (the boards
+    /// are laid out from the body's middle, not from the pith).
+    pub stock: [f32; 3],
 }
 
 /// A species: a stable id (the starter preset id without `starter.wood.`) and its look.
@@ -66,7 +70,7 @@ const fn species(
     streaks: f32,
     roughness: [f32; 2],
 ) -> Species {
-    Species { id, look: WoodLook { early, late, streak, light, ring_mm, contrast, figure_mm, pores, streaks, roughness, seed: 0 } }
+    Species { id, look: WoodLook { early, late, streak, light, ring_mm, contrast, figure_mm, pores, streaks, roughness, seed: 0, stock: [0.0; 3] } }
 }
 
 /// A species as raw, unfinished timber: greyer, paler, flatter and matt (what an oil or a
@@ -90,9 +94,9 @@ const OAK_HONEY: Species = species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 
 const OAK_SMOKED: Species = species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]);
 // Walnut with a clear finish: warm chocolate heartwood, amber zones, near-black streaks, open
 // pores (no sapwood band).
-const WALNUT: Species = species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(46, 29, 22), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.6, [0.30, 0.38]);
+const WALNUT: Species = species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(56, 36, 27), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.45, [0.30, 0.38]);
 // Raw walnut is its own colours: a cool grey-brown with a faint purple cast.
-const WALNUT_RAW: Species = species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.45, [0.80, 0.88]);
+const WALNUT_RAW: Species = species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.35, [0.80, 0.88]);
 const MAPLE: Species = species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]);
 const CHERRY: Species = species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]);
 const ASH: Species = species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
@@ -150,15 +154,20 @@ impl WoodShade {
 
     /// The wood's colour and roughness at `p` (world, mm).
     pub fn sample(&self, p: Vec3) -> WoodSample {
-        sample(&self.look, self.grain_point(p), 0.0)
+        sample(&self.look, self.grain_point(p), [0.0; 3], [0.0; 3])
     }
 
-    /// The same, as a pixel `footprint_mm` wide (world) sees it: detail finer than the pixel
-    /// fades to its average, so a far view is calm and does not shimmer.
-    pub fn sample_seen(&self, p: Vec3, footprint_mm: f64) -> WoodSample {
-        let r = self.to_grain[1];
-        let scale = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
-        sample(&self.look, self.grain_point(p), footprint_mm as f32 * scale)
+    /// A world step (mm) in grain space.
+    pub fn grain_step(&self, v: Vec3) -> [f32; 3] {
+        let [x, y, z] = [v.x as f32, v.y as f32, v.z as f32];
+        self.to_grain.map(|r| r[0] * x + r[1] * y + r[2] * z)
+    }
+
+    /// The same, as a pixel sees it whose steps across the screen are `dx` and `dy` on the
+    /// surface (world, mm): detail finer than the pixel fades to its average, so a far or a
+    /// steep view is calm and does not shimmer.
+    pub fn sample_seen(&self, p: Vec3, dx: Vec3, dy: Vec3) -> WoodSample {
+        sample(&self.look, self.grain_point(p), self.grain_step(dx), self.grain_step(dy))
     }
 
     /// The same shade seen through a rigid or affine move `m` (rows, world ← local): for a
@@ -178,7 +187,7 @@ impl WoodShade {
         WoodShade { look: self.look, to_grain: out }
     }
 
-    /// The shade as the GPU reads it: 8 `vec4`s (see [`WGSL`]).
+    /// The shade as the GPU reads it: 9 `vec4`s (see [`WGSL`]).
     pub fn texels(&self) -> [[f32; 4]; TEXELS] {
         let l = &self.look;
         let [r0, r1, r2] = self.to_grain;
@@ -192,12 +201,13 @@ impl WoodShade {
             r0,
             r1,
             r2,
+            [l.stock[0], l.stock[1], l.stock[2], 0.0],
         ]
     }
 }
 
 /// `vec4`s per wood slot on the GPU.
-pub const TEXELS: usize = 8;
+pub const TEXELS: usize = 9;
 
 // Integer hash → [0, 1). Kept bit for bit equal to the WGSL `wood_hash`.
 fn hash(x: i32, y: i32, z: i32, seed: u32) -> f32 {
@@ -237,14 +247,48 @@ fn scaled(g: [f32; 3], along: f32, across: f32) -> [f32; 3] {
     [g[0] * along, g[1] * across, g[2] * across]
 }
 
-/// The wood function, at point `g` in grain space (mm), seen by a pixel `fp` wide (grain mm; 0:
-/// a point). Mirrors the WGSL `wood_sample`.
-pub fn sample(l: &WoodLook, g: [f32; 3], fp: f32) -> WoodSample {
+/// The wood function, at point `g` in grain space (mm), seen by a pixel whose steps across the
+/// screen are `fx` and `fy` in grain space (zero: a point). Detail finer than the pixel fades
+/// to its average, each kind by the footprint in its own direction: rings by how many of them
+/// a pixel crosses, fibres and pores by the pixel's width across the grain. So a far or a
+/// steep view is calm, and a steep view along the grain keeps its lines. Mirrors the WGSL
+/// `wood_sample`.
+pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSample {
     let s = l.seed;
-    // How much of the rings, and of the fine detail (pores, flecks, fibres), a pixel this wide
-    // still resolves.
-    let rings = 1.0 - smoothstep(0.6, 1.4, fp / l.ring_mm);
-    let fine = 1.0 - smoothstep(1.2, 4.0, fp);
+    // The pixel's width across the grain and its length along it, mm.
+    let across = (fx[1] * fx[1] + fx[2] * fx[2]).sqrt().max((fy[1] * fy[1] + fy[2] * fy[2]).sqrt());
+    let along = fx[0].abs().max(fy[0].abs());
+    // Glued-up stock: the body is made of boards `stock[0]` wide (and `stock[1]` long, 0: full
+    // length), each cut from its own place in a log, with a glue line between them.
+    let mut g = g;
+    let mut seam = 0.0;
+    let mut tone = 1.0;
+    if l.stock[0] > 0.0 {
+        let wide = l.stock[0];
+        let yb = g[1] + l.stock[2];
+        let j = (yb / wide + 0.5).floor();
+        let ji = j as i32;
+        let mut ii = 0;
+        let mut butt = 1.0e9;
+        if l.stock[1] > 0.0 {
+            let xs = g[0] + hash(ji, 0, 0, s ^ 0x2545_f491) * l.stock[1];
+            let i = (xs / l.stock[1]).floor();
+            let u = xs - i * l.stock[1];
+            butt = u.min(l.stock[1] - u);
+            ii = i as i32;
+        }
+        let h1 = hash(ji, ii, 1, s ^ 0x2545_f491);
+        let h2 = hash(ji, ii, 2, s ^ 0x2545_f491);
+        let h3 = hash(ji, ii, 3, s ^ 0x2545_f491);
+        let h4 = hash(ji, ii, 4, s ^ 0x2545_f491);
+        let yl = yb - j * wide;
+        let edge = (0.5 * wide - yl.abs()).min(butt);
+        let line_mm = 0.15 + across.max(along);
+        seam = 0.45 * (1.0 - smoothstep(0.0, line_mm, edge)) * (0.15 / line_mm);
+        tone = 0.93 + 0.14 * h4;
+        let side = if h3 < 0.5 { -1.0 } else { 1.0 };
+        g = [g[0] + 40000.0 * h3, yl - l.stock[2] - (h1 - 0.5) * wide * 1.2, g[2] - side * (15.0 + 120.0 * h2)];
+    }
     // Figure: the rings wander, slowly along the grain and a little faster across it.
     let w = scaled(g, 0.004, 0.02);
     let dy = noise(w, s) - 0.5;
@@ -256,11 +300,17 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fp: f32) -> WoodSample {
     let y = g[1] + l.figure_mm * (2.0 * dy + 9.0 * ey);
     let z = g[2] + l.figure_mm * (2.0 * dz + 9.0 * ez);
     let r = (y * y + z * z).sqrt();
+    // Rings a pixel crosses: its steps, taken outward from the pith.
+    let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * l.ring_mm);
+    let rings = 1.0 - smoothstep(0.35, 1.0, fr);
+    let thin = 1.0 - smoothstep(0.08, 0.35, fr);
     // Rings: uneven widths from year to year.
     let ring = r / l.ring_mm + 0.6 * (noise(scaled([g[0], y, z], 0.01, 0.04), s ^ 0x85eb_ca6b) - 0.5);
     let t = ring - ring.floor();
-    // Earlywood grades into latewood across the ring, which ends sharply at the next ring.
-    let late = mixf(0.25, smoothstep(0.55, 0.95, t), rings) * l.contrast;
+    // Earlywood grades into latewood across the ring, which ends at the next ring: sharply
+    // close up, over a pixel's width from afar (a hard edge finer than a pixel would shimmer).
+    let wrap = 1.0 - smoothstep(1.0 - fr.clamp(0.02, 0.5), 1.0, t);
+    let late = mixf(0.25, smoothstep(0.55, 0.95, t) * wrap, rings) * l.contrast;
     let q = [g[0], y, z];
     // Colour zones: broad bands of the lighter, warmer tone that run the length of a board.
     // The same point by its ring: along the grain, out from the pith, and around it. Colour
@@ -269,23 +319,29 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fp: f32) -> WoodSample {
     let zone = smoothstep(0.35, 0.8, noise([g[0] * 0.0015, r * 0.05, around * 0.05], s ^ 0x1656_67b1));
     // Dark streaks: long along the grain, a few mm across.
     let streak = smoothstep(0.6, 0.92, noise([g[0] * 0.004, r * 0.25, around * 0.03], s ^ 0xc2b2_ae35)) * l.streaks;
+    // How much of each size of detail a pixel this wide still resolves.
+    let fine = 1.0 - smoothstep(0.08, 0.25, across);
+    let coarse = 1.0 - smoothstep(0.25, 0.8, across);
+    let mid = 1.0 - smoothstep(0.8, 2.5, across);
     // Pores: the cut vessels, short dark dashes along the grain (dots on end grain), mostly in
     // the earlywood.
-    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.1, 1.8), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * fine;
+    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.1, 1.8), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * coarse * (1.0 - smoothstep(3.0, 10.0, along));
     // Ray flecks: short pale ticks.
-    let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * fine;
-    // Fibres along the grain, coarse and fine.
-    let fibre = mixf(1.0, (0.92 + 0.16 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372)) * (0.94 + 0.12 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85)), fine);
+    let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * coarse * (1.0 - smoothstep(1.0, 3.3, along));
+    // Fibres along the grain: coarse, fine, and broad soft ones that still show from afar.
+    let fibre = mixf(1.0, 0.92 + 0.16 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372), coarse)
+        * mixf(1.0, 0.94 + 0.12 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85), fine)
+        * mixf(1.0, 0.95 + 0.1 * noise(scaled(q, 0.012, 0.45), s ^ 0xa54f_f53a), mid);
     // The crisp dark line that ends each year's growth.
-    let line = smoothstep(0.88, 0.97, t) * rings * l.contrast;
+    let line = smoothstep(0.88, 0.97, t) * wrap * thin * l.contrast;
     // Ripple: faint bands across the grain, where the fibres dip and rise.
-    let ripple = 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab);
+    let ripple = mixf(1.0, 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab), 1.0 - smoothstep(5.0, 16.0, along));
     let mut c = [0f32; 3];
     for k in 0..3 {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
-        c[k] = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.25 * line) * fibre * ripple).clamp(0.0, 1.0);
+        c[k] = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam)).clamp(0.0, 1.0);
     }
     let roughness = (mixf(l.roughness[0], l.roughness[1], late / l.contrast.max(1e-3)) + 0.08 * pore).clamp(0.02, 1.0);
     WoodSample { srgb: c, roughness }
@@ -317,11 +373,13 @@ pub struct Frame {
     /// grow out from its middle; moving it out places the board elsewhere in the log, toward
     /// its bark (cathedral arches on a flat-sawn face, straight lines once far away).
     pub pith_mm: [f64; 2],
+    /// How far the grain is slid along its length, mm.
+    pub shift_mm: f64,
 }
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { axis: Axis::Long, scale: 1.0, pith_mm: [0.0, 0.0] }
+        Frame { axis: Axis::Long, scale: 1.0, pith_mm: [0.0, 0.0], shift_mm: 0.0 }
     }
 }
 
@@ -380,7 +438,7 @@ pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) 
     let pith = c + wide * frame.pith_mm[0] + thin * frame.pith_mm[1];
     let s = 1.0 / frame.scale.clamp(0.01, 100.0);
     let row = |axis: Vec3, offset: f64| [(axis.x * s) as f32, (axis.y * s) as f32, (axis.z * s) as f32, (-offset * s) as f32];
-    Some([row(along, start), row(wide, pith.dot(wide)), row(thin, pith.dot(thin))])
+    Some([row(along, start + frame.shift_mm), row(wide, pith.dot(wide)), row(thin, pith.dot(thin))])
 }
 
 // The largest and the smallest eigenvector of a symmetric 3×3 matrix (power iteration, from
@@ -473,10 +531,67 @@ mod tests {
             l.seed = 1234;
             for i in 0..500 {
                 let g = [i as f32 * 3.7 - 900.0, (i * 7 % 113) as f32 - 50.0, 140.0 + (i % 19) as f32];
-                let a = sample(&l, g, (i % 4) as f32);
-                assert_eq!(a, sample(&l, g, (i % 4) as f32));
+                if i % 2 == 0 {
+                    l.stock = [80.0, (i % 3) as f32 * 400.0, 12.0];
+                }
+                let (fx, fy) = ([(i % 4) as f32, 0.2, 0.0], [0.0, 0.1, (i % 3) as f32 * 0.4]);
+                let a = sample(&l, g, fx, fy);
+                assert_eq!(a, sample(&l, g, fx, fy));
                 assert!(a.srgb.iter().all(|v| (0.0..=1.0).contains(v)) && (0.02..=1.0).contains(&a.roughness), "{} {a:?}", sp.id);
             }
+        }
+    }
+
+    /// A steep view along the grain (a pixel long along it, narrow across it) keeps its rings
+    /// and fibres; a pixel wide across the grain fades them to their average.
+    #[test]
+    fn detail_fades_by_the_pixels_width_across_the_grain_only() {
+        let mut l = species_look("walnut-dark").unwrap();
+        l.seed = 99;
+        let spread = |fx: [f32; 3], fy: [f32; 3]| {
+            let v: Vec<f32> = (0..400).map(|i| sample(&l, [300.0, 30.0 + i as f32 * 0.137, 60.0], fx, fy).srgb[0]).collect();
+            let mean = v.iter().sum::<f32>() / v.len() as f32;
+            (v.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / v.len() as f32).sqrt()
+        };
+        let sharp = spread([0.0; 3], [0.0; 3]);
+        let steep = spread([6.0, 0.0, 0.0], [0.0, 0.05, 0.0]);
+        let far = spread([0.0, 6.0, 0.0], [0.0, 0.0, 6.0]);
+        assert!(steep > 0.6 * sharp, "along the grain: {steep} of {sharp}");
+        assert!(far < 0.5 * sharp, "across the grain: {far} of {sharp}");
+    }
+
+    /// Glued-up stock: each board has its own grain, with a darker glue line between two.
+    #[test]
+    fn glued_up_boards_differ_and_show_their_glue_lines() {
+        let mut l = species_look("maple-light").unwrap();
+        l.seed = 5;
+        let plain = l;
+        l.stock = [100.0, 0.0, 0.0];
+        let at = |l: &WoodLook, y: f32| sample(l, [250.0, y, 8.0], [0.0; 3], [0.0; 3]).srgb;
+        // Boards are laid out from the body's middle: one spans -50…50, the next 50…150.
+        let (a, b): (Vec<_>, Vec<_>) = (0..40).map(|i| (at(&l, -40.0 + i as f32 * 2.0), at(&l, 60.0 + i as f32 * 2.0))).unzip();
+        assert_ne!(a, b, "two boards, two grains");
+        let lum = |c: [f32; 3]| c[0] + c[1] + c[2];
+        let seam = lum(at(&l, 50.0));
+        let beside = (lum(at(&l, 48.0)) + lum(at(&l, 52.0))) / 2.0;
+        assert!(seam < 0.8 * beside, "the glue line is darker: {seam} beside {beside}");
+        assert_ne!(at(&l, 10.0), at(&plain, 10.0));
+    }
+
+    /// Sliding the grain along its length moves the same pattern.
+    #[test]
+    fn a_shift_slides_the_grain_along_the_board() {
+        let (p, t) = board();
+        let look = species_look("oak-honey").unwrap();
+        let a = WoodShade { look, to_grain: frame_for_mesh(&p, &t, Frame::default()).unwrap() };
+        let b = WoodShade { look, to_grain: frame_for_mesh(&p, &t, Frame { shift_mm: 40.0, pith_mm: [5.0, -3.0], ..Frame::default() }).unwrap() };
+        let along = Vec3::new(f64::from(a.to_grain[0][0]), f64::from(a.to_grain[0][1]), f64::from(a.to_grain[0][2]));
+        let wide = Vec3::new(f64::from(a.to_grain[1][0]), f64::from(a.to_grain[1][1]), f64::from(a.to_grain[1][2]));
+        let thin = Vec3::new(f64::from(a.to_grain[2][0]), f64::from(a.to_grain[2][1]), f64::from(a.to_grain[2][2]));
+        for i in 0..50 {
+            let q = Vec3::new(10.0 + f64::from(i) * 7.0, 20.0 + f64::from(i % 7) * 5.0, 3.0);
+            let (x, y) = (a.grain_point(q), b.grain_point(q + along * 40.0 + wide * 5.0 - thin * 3.0));
+            assert!((0..3).all(|k| (x[k] - y[k]).abs() < 1e-3), "{x:?} {y:?}");
         }
     }
 
