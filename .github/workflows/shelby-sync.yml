@@ -1,0 +1,88 @@
+# Personal fork only (sidewinderzz/solidcraft), never for upstream.
+#
+# Rebuilds the shelby-build branch from scratch: upstream SolidCraft's main
+# (tangency-labs/solidcraft), plus the shelby-setup branch (these workflows and the fork's update
+# settings), plus every branch listed in .github/shelby-build-branches.txt on shelby-setup.
+# When the result differs from shelby-build, it replaces shelby-build, and that push starts
+# "Shelby build". shelby-build is only ever made this way, so feature branches may be rebased
+# freely; change shelby-setup or the feature branches, never shelby-build itself.
+#
+# On a merge conflict the run stops and fails (GitHub emails a failed run), names the branch and
+# files, and shelby-build stays as it was until that branch is rebased onto upstream main.
+#
+# Needs the SYNC_TOKEN secret: a fine-grained token for this repository only, with Contents and
+# Workflows read and write. GITHUB_TOKEN can't do this job: GitHub refuses its pushes when
+# upstream changed a workflow file, and its pushes never start other workflows.
+name: Shelby sync
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shelby-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the token
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::The SYNC_TOKEN secret is missing (see the comment at the top of this workflow)"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: shelby-setup
+          fetch-depth: 0
+          filter: blob:none
+          token: ${{ secrets.SYNC_TOKEN }}
+      - name: Rebuild shelby-build
+        run: |
+          git config user.name "shelby-build sync"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/tangency-labs/solidcraft.git
+          git fetch --no-tags upstream main
+          git fetch --no-tags origin shelby-setup
+          git show origin/shelby-setup:.github/shelby-build-branches.txt >"$RUNNER_TEMP/branches.txt"
+
+          echo "### Sync" >>"$GITHUB_STEP_SUMMARY"
+          git checkout -q -B next upstream/main
+          echo "- upstream main: $(git rev-parse --short=9 HEAD)" >>"$GITHUB_STEP_SUMMARY"
+
+          merge() { # <ref> <label>
+            local sha
+            sha=$(git rev-parse --short=9 "$1")
+            if git merge --no-edit -m "Merge $2 ($sha)" "$1"; then
+              echo "- $2: $sha" >>"$GITHUB_STEP_SUMMARY"
+            else
+              files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+              echo "::error::$2 conflicts with upstream main in: $files. Rebase $2 onto upstream main."
+              echo "- **$2 ($sha): conflict** in $files. Nothing was pushed; rebase $2 onto upstream main." >>"$GITHUB_STEP_SUMMARY"
+              git merge --abort
+              exit 1
+            fi
+          }
+
+          merge origin/shelby-setup shelby-setup
+          while read -r branch; do
+            case "$branch" in ''|'#'*) continue ;; esac
+            git fetch --no-tags origin "$branch"
+            merge "origin/$branch" "$branch"
+          done <"$RUNNER_TEMP/branches.txt"
+
+          if git fetch --no-tags origin shelby-build 2>/dev/null &&
+             [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'origin/shelby-build^{tree}')" ]; then
+            echo "Nothing new: no build." >>"$GITHUB_STEP_SUMMARY"
+          else
+            git push --force origin HEAD:shelby-build
+            echo "Pushed $(git rev-parse --short=9 HEAD) to shelby-build: Shelby build starts from this push." >>"$GITHUB_STEP_SUMMARY"
+          fi

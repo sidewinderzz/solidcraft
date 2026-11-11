@@ -1,0 +1,172 @@
+# Personal fork only (sidewinderzz/solidcraft), never for upstream.
+#
+# Builds SolidCraft for Windows x64 and arm64 from the shelby-build branch (which shelby-sync.yml
+# makes) and publishes a GitHub Release on this fork. The app on this branch checks this fork's releases for updates
+# (crates/ui-egui/src/update.rs), so an installed copy offers "Update now" for every new build.
+#
+# Faster than release.yml for iterating:
+#   - only the two Windows packages (no Linux, macOS, Snap, Flatpak, FreeBSD, web, x86);
+#   - no icons job (it built the CLI only to copy the committed icon files);
+#   - sccache keeps compiled crates between runs, so a change rebuilds only the crates it touches;
+#   - no LTO for these personal builds (much shorter link; the app runs a little slower);
+#   - a newer push cancels an older run instead of queueing behind it.
+#
+# Versions: the upstream version without its suffix, with the patch number widened by this
+# workflow's run number (0.40.0-rc.3 on run 12 -> 0.40.12), so every build is a newer stable
+# version to the update check and to the MSI installer.
+name: Shelby build
+
+on:
+  push:
+    branches: [shelby-build]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Which Windows builds (a release is published only when both are built)"
+        type: choice
+        options: [both, arm64, x64]
+        default: both
+      publish:
+        description: "Publish a release for the in-app updater"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shelby-build
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      arches: ${{ steps.v.outputs.arches }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: Cargo.toml
+          sparse-checkout-cone-mode: false
+      - id: v
+        env:
+          ARCH: ${{ inputs.arch || 'both' }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          base=$(awk '/^\[/ { p = ($0 == "[workspace.package]"); next } p && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }' Cargo.toml)
+          base=${base%%-*}
+          IFS=. read -r major minor patch <<<"$base"
+          version="$major.$minor.$((patch * 1000 + GITHUB_RUN_NUMBER))"
+          case "$ARCH" in
+            both) arches='["x64","arm64"]' ;;
+            *) arches="[\"$ARCH\"]"; PUBLISH=false ;;
+          esac
+          { echo "version=$version"; echo "arches=$arches"; echo "publish=$PUBLISH"; } >>"$GITHUB_OUTPUT"
+          echo "### SolidCraft $version (Shelby build, \`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.version.outputs.arches) }}
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: target
+        shell: bash
+        run: |
+          case "${{ matrix.arch }}" in
+            x64) echo "target=x86_64-pc-windows-msvc" >>"$GITHUB_OUTPUT" ;;
+            arm64) echo "target=aarch64-pc-windows-msvc" >>"$GITHUB_OUTPUT" ;;
+          esac
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ steps.target.outputs.target }}
+      # Downloaded crates only; compiled output is sccache's job.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: shelby-windows-${{ matrix.arch }}
+          cache-targets: false
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+      - name: Build and package (msi, portable zip)
+        shell: pwsh
+        run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "#### Windows ${{ matrix.arch }}: compiler cache"
+            echo '```'
+            sccache --show-stats
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shelby-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    needs: [version, windows]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: shelby-windows-*
+          path: artifacts
+          merge-multiple: true
+      - name: Fixed names and checksums
+        working-directory: artifacts
+        run: |
+          # The update check looks for these fixed names (update.rs, asset_name).
+          for arch in x64 arm64; do
+            cp "solidcraft-$VERSION-windows-$arch.msi" "solidcraft-windows-$arch.msi"
+            cp "solidcraft-$VERSION-windows-$arch-portable.zip" "solidcraft-windows-$arch-portable.zip"
+          done
+          sha256sum -- * | tee SHA256SUMS.txt
+      - name: Publish
+        working-directory: artifacts
+        run: |
+          {
+            echo "Personal build of the \`shelby-build\` branch at ${GITHUB_SHA::9}: upstream SolidCraft plus the branches in \`.github/shelby-build-branches.txt\`."
+            echo
+            echo "Install \`solidcraft-windows-arm64.msi\` or \`solidcraft-windows-x64.msi\`. Installed copies offer **Update now** when the next build is published."
+            echo
+            echo "Changes: https://github.com/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"
+          } >notes.md
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "SolidCraft $VERSION (Shelby build)" --notes-file notes.md --latest \
+            $(ls | grep -v '^notes.md$')
+      - name: Keep the last 5 releases
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+            while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
