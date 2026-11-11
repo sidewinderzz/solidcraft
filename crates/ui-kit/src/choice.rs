@@ -616,6 +616,31 @@ pub fn color_swatch<T: Send + Sync + 'static>(
     tip: &str,
     payload: T,
 ) -> egui::Response {
+    swatch(ui, id, color, None, selected, tip, payload)
+}
+
+/// [`color_swatch`] showing a picture of the sample (a wood's grain) in place of its flat colour.
+/// Tokens: as `color_swatch`.
+pub fn picture_swatch<T: Send + Sync + 'static>(
+    ui: &mut Ui,
+    id: egui::Id,
+    picture: &egui::TextureHandle,
+    selected: bool,
+    tip: &str,
+    payload: T,
+) -> egui::Response {
+    swatch(ui, id, egui::Color32::WHITE, Some(picture), selected, tip, payload)
+}
+
+fn swatch<T: Send + Sync + 'static>(
+    ui: &mut Ui,
+    id: egui::Id,
+    color: egui::Color32,
+    picture: Option<&egui::TextureHandle>,
+    selected: bool,
+    tip: &str,
+    payload: T,
+) -> egui::Response {
     let t = solidcraft_theme::Tokens::get();
     let response = ui
         .dnd_drag_source(id, payload, |ui| {
@@ -640,7 +665,15 @@ pub fn color_swatch<T: Send + Sync + 'static>(
                     }
                 }
             }
-            ui.painter().rect(rect, t.control_radius, color, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
+            match picture {
+                Some(picture) => {
+                    egui::Image::new(picture).corner_radius(t.control_radius).paint_at(ui, rect);
+                    ui.painter().rect_stroke(rect, t.control_radius, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
+                }
+                None => {
+                    ui.painter().rect(rect, t.control_radius, color, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
+                }
+            }
         })
         .response;
     let response = ui.interact(response.rect, id.with("click"), egui::Sense::click()).backing_on_hover_text(tip);

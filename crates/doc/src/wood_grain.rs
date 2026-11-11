@@ -25,6 +25,12 @@ pub struct Grain {
     /// Where the log's centre (the pith) lies from the board's middle, mm: `[across its width,
     /// across its thickness]`. `[0, 0]`: rings centred on the board.
     pub pith_offset_mm: [f64; 2],
+    /// How far the grain is slid along its length, mm.
+    pub shift_mm: f64,
+    /// Glued-up stock, mm: `[board width, board length]`. The body is shown as boards this
+    /// wide glued edge to edge (and, with a length above 0, end to end), each with its own
+    /// grain. `None`: one piece.
+    pub stock_mm: Option<[f64; 2]>,
     /// How strongly the rings show, relative to the species (1: as the species; 0: none).
     pub contrast: f64,
     /// Pore density, 0…1 (`None`: the species').
@@ -46,7 +52,7 @@ impl Grain {
     /// The species' default grain.
     pub fn species(species: &str) -> Option<Grain> {
         wood::species_look(species)?;
-        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], contrast: 1.0, pores: None, streaks: None })
+        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], shift_mm: 0.0, stock_mm: None, contrast: 1.0, pores: None, streaks: None })
     }
 
     /// Check the values (finite, in range, a known species).
@@ -68,6 +74,14 @@ impl Grain {
         }
         if !self.pith_offset_mm.iter().all(|v| v.is_finite() && v.abs() <= MAX_PITH_MM) {
             return Err(format!("`grain.pith_offset_mm` must be within ±{MAX_PITH_MM} mm (past that the rings are straight lines)"));
+        }
+        if !(self.shift_mm.is_finite() && self.shift_mm.abs() <= MAX_PITH_MM) {
+            return Err(format!("`grain.shift_mm` must be within ±{MAX_PITH_MM} mm"));
+        }
+        if let Some([w, l]) = self.stock_mm
+            && !(w.is_finite() && (5.0..=5000.0).contains(&w) && l.is_finite() && (l == 0.0 || (50.0..=50_000.0).contains(&l)))
+        {
+            return Err("`grain.stock_mm` must be [board width 5…5000, board length 0 (full length) or 50…50000] in mm".into());
         }
         if !(self.contrast.is_finite() && (0.0..=3.0).contains(&self.contrast)) {
             return Err("`grain.contrast` must be 0…3".into());
@@ -107,7 +121,12 @@ impl Grain {
             GrainAxis::Long => Axis::Long,
             GrainAxis::Fixed(v) => Axis::Fixed(v),
         };
-        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm })?;
+        if let Some([w, l]) = self.stock_mm {
+            // In grain mm: the pattern's scale stretches the grain, not the boards.
+            let s = 1.0 / self.scale.clamp(0.01, 100.0);
+            look.stock = [(w * s) as f32, (l * s) as f32, (self.pith_offset_mm[0] * s) as f32];
+        }
+        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
         Some(WoodShade { look, to_grain })
     }
 
@@ -146,11 +165,13 @@ impl Grain {
                 "ring_spacing_mm" => self.ring_spacing_mm = Some(x.as_f64().ok_or("`grain.ring_spacing_mm` must be a number")?),
                 "figure" => self.figure = x.as_f64().ok_or("`grain.figure` must be a number")?,
                 "pith_offset_mm" => self.pith_offset_mm = parse_pith(x)?,
+                "shift_mm" => self.shift_mm = x.as_f64().ok_or("`grain.shift_mm` must be a number")?,
+                "stock_mm" => self.stock_mm = parse_stock(x)?,
                 "contrast" => self.contrast = x.as_f64().ok_or("`grain.contrast` must be a number")?,
                 "pores" => self.pores = Some(x.as_f64().ok_or("`grain.pores` must be a number")?),
                 "streaks" => self.streaks = Some(x.as_f64().ok_or("`grain.streaks` must be a number")?),
                 other => {
-                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, contrast, pores, streaks)"));
+                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, contrast, pores, streaks)"));
                 }
             }
         }
@@ -169,6 +190,18 @@ fn parse_pith(v: &Value) -> Result<[f64; 2], String> {
     match v {
         Value::Number(n) => Ok([0.0, n.as_f64().ok_or_else(bad)?]),
         Value::Array(a) if a.len() == 2 => Ok([a[0].as_f64().ok_or_else(bad)?, a[1].as_f64().ok_or_else(bad)?]),
+        _ => Err(bad()),
+    }
+}
+
+/// `stock_mm`: `[board width, board length]`, one number (the width, full-length boards), or
+/// null (one piece).
+fn parse_stock(v: &Value) -> Result<Option<[f64; 2]>, String> {
+    let bad = || "`grain.stock_mm` must be [board width, board length] in mm, one number (the width) or null".to_string();
+    match v {
+        Value::Null => Ok(None),
+        Value::Number(n) => Ok(Some([n.as_f64().ok_or_else(bad)?, 0.0])),
+        Value::Array(a) if a.len() == 2 => Ok(Some([a[0].as_f64().ok_or_else(bad)?, a[1].as_f64().ok_or_else(bad)?])),
         _ => Err(bad()),
     }
 }
@@ -223,6 +256,10 @@ struct GrainWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pith_offset_mm: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    shift_mm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stock_mm: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     contrast: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pores: Option<f64>,
@@ -241,6 +278,8 @@ impl TryFrom<GrainWire> for Grain {
             ring_spacing_mm: w.ring_spacing_mm,
             figure: w.figure.unwrap_or(1.0),
             pith_offset_mm: w.pith_offset_mm.unwrap_or([0.0, 0.0]),
+            shift_mm: w.shift_mm.unwrap_or(0.0),
+            stock_mm: w.stock_mm,
             contrast: w.contrast.unwrap_or(1.0),
             pores: w.pores,
             streaks: w.streaks,
@@ -263,6 +302,8 @@ impl From<Grain> for GrainWire {
             ring_spacing_mm: g.ring_spacing_mm,
             figure: (g.figure != 1.0).then_some(g.figure),
             pith_offset_mm: (g.pith_offset_mm != [0.0, 0.0]).then_some(g.pith_offset_mm),
+            shift_mm: (g.shift_mm != 0.0).then_some(g.shift_mm),
+            stock_mm: g.stock_mm,
             contrast: (g.contrast != 1.0).then_some(g.contrast),
             pores: g.pores,
             streaks: g.streaks,
@@ -279,11 +320,11 @@ mod tests {
     fn grain_settings_round_trip_and_refuse_bad_values() {
         let mut g = Grain::species("starter.wood.walnut-dark").unwrap();
         assert_eq!(serde_json::to_value(&g).unwrap(), json!({"species": "walnut-dark"}));
-        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
+        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "shift_mm": 40.0, "stock_mm": [150.0, 1200.0], "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
-        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"pores": 2})] {
+        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"stock_mm": [1, 0]}), json!({"shift_mm": 1e9}), json!({"pores": 2})] {
             assert!(g.clone().apply_json(&bad).is_err(), "{bad}");
         }
         assert!(serde_json::from_value::<Grain>(json!({"species": "walnut-dark", "scale": 1e9})).is_err());

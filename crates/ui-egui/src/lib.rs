@@ -76,6 +76,7 @@ pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
+mod grain_drag;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
 mod history_folds;

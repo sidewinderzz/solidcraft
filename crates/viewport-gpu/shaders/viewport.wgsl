@@ -625,7 +625,7 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a));
+    return lit_color(i, 1.0, vec4<f32>(wooded(i).rgb + u.tint.rgb, i.c.a));
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
@@ -691,11 +691,12 @@ fn wood_texel(slot: u32, k: u32) -> vec4<f32> {
 /// bits name the body's wood record, 0: none).
 fn wooded(i: TOut) -> vec4<f32> {
     let slot = i.h >> 8u;
-    // The pixel's width on the surface, mm (taken before the branch: derivatives need uniform
+    // The pixel's steps on the surface, mm (taken before the branch: derivatives need uniform
     // control flow).
-    let seen = length(fwidth(i.wp));
+    let dx = dpdx(i.wp);
+    let dy = dpdy(i.wp);
     if (slot == 0u) { return i.c; }
-    let w = wood_sample(slot, wood_grain(slot, i.wp), seen * length(wood_texel(slot, 6u).xyz));
+    let w = wood_sample(slot, wood_grain(slot, i.wp), wood_step(slot, dx), wood_step(slot, dy));
     return vec4<f32>(w.rgb, i.c.a);
 }
 

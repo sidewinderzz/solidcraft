@@ -273,6 +273,8 @@ pub struct ViewportState {
     pub(crate) joint_handles: Option<crate::joint_handles::Mode>,
     /// A free part being dragged to a new place (#2804).
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
+    /// A wood's grain being dragged through its body (Appearance's Move grain).
+    pub(crate) grain_drag: Option<crate::grain_drag::Drag>,
     /// Extrude by pulling a face or profile.
     pub(crate) drag_extrude: crate::drag_extrude::State,
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
@@ -5615,6 +5617,28 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::sketch_text_handles::dragging(app) && !crate::ui_kit::input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
+    // Appearance's Move grain: a drag on a wooden body slides its grain through it.
+    if crate::grain_drag::armed(app) && primary_nav.is_none() && mode.is_none() && !held {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && !(mods.shift || mods.command || mods.ctrl || mods.alt)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && rect.contains(a)
+            && !crate::shell::covered(app, a)
+            && !axes.contains(a)
+        {
+            crate::grain_drag::start(app, &proj, a);
+        }
+        if crate::grain_drag::active(app)
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            crate::grain_drag::to(app, &proj, p);
+        }
+    }
+    if crate::grain_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
+        crate::grain_drag::end(app);
+    }
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
@@ -5680,6 +5704,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::joint_handles::active(app)
         && !joint_handle_pointer
         && !crate::occurrence_drag::active(app)
+        && !crate::grain_drag::active(app)
+        && !crate::grain_drag::armed(app)
         && !crate::drag_extrude::started(app)
         && !crate::dim_view::dragging()
         && !crate::sketch3d::dragging()
