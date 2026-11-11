@@ -355,7 +355,14 @@ impl Document {
     pub fn look_wood(&self, body: &crate::ModelBody, look: &Look) -> Option<solidcraft_viewport::wood::WoodShade> {
         let grain = look.grain.as_ref()?;
         let mesh = body.mesh();
-        grain.shade(&body.name, &mesh.positions, &mesh.triangles)
+        let shade = grain.shade(&body.name, &mesh.positions, &mesh.triangles)?;
+        // The look's own colour and roughness finish the wood: its colour tints the species
+        // (from its starter preset's colour), its roughness is the gloss.
+        let preset = crate::appearance_pack::find(&format!("starter.wood.{}", grain.species)).and_then(|p| match p.recipe {
+            crate::appearance_pack::Recipe::Opaque(r) => Some(r.color),
+            _ => None,
+        });
+        Some(crate::wood_grain::Grain::finished(shade, preset, look.color, look.pbr.map(|p| p.roughness())))
     }
 
     /// Shared definition appearance for a computed occurrence body.

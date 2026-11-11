@@ -1,0 +1,9 @@
+{
+  "en": {
+    "appearance.grain.ring_spacing": "Ring spacing (mm)",
+    "appearance.grain.contrast": "Ring contrast",
+    "appearance.grain.figure": "Figure",
+    "appearance.grain.pores": "Pores",
+    "appearance.grain.streaks": "Streaks"
+  }
+}

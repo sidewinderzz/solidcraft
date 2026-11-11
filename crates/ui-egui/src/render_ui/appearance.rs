@@ -548,6 +548,46 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                     commit |= ended(&response, ui);
                 });
             }
+            // A wood's grain: how close its rings are, how strongly they show, how much they
+            // wander, and its pores and streaks.
+            if let Some(grain) = draft.grain.as_mut() {
+                let species = solidcraft_viewport::wood::species_look(&grain.species);
+                let mut ring = grain.ring_spacing_mm.unwrap_or_else(|| species.map_or(3.0, |l| f64::from(l.ring_mm)));
+                let mut pores = grain.pores.unwrap_or_else(|| species.map_or(0.5, |l| f64::from(l.pores)));
+                let mut streaks = grain.streaks.unwrap_or_else(|| species.map_or(0.5, |l| f64::from(l.streaks)));
+                let (mut contrast, mut figure) = (grain.contrast, grain.figure);
+                let mut edited = [false; 5];
+                for (at, (key, value, range)) in [
+                    ("appearance.grain.ring_spacing", &mut ring, 0.5..=20.0),
+                    ("appearance.grain.contrast", &mut contrast, 0.0..=3.0),
+                    ("appearance.grain.figure", &mut figure, 0.0..=5.0),
+                    ("appearance.grain.pores", &mut pores, 0.0..=1.0),
+                    ("appearance.grain.streaks", &mut streaks, 0.0..=1.0),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    ui_kit::row(ui, app.tr(key), |ui| {
+                        let response = ui_kit::mixed_slider(ui, value, range, None);
+                        view.dirty |= response.changed();
+                        if let Some(e) = edited.get_mut(at) {
+                            *e = response.changed();
+                        }
+                        commit |= ended(&response, ui);
+                    });
+                }
+                if edited[0] {
+                    grain.ring_spacing_mm = Some(ring);
+                }
+                grain.contrast = contrast;
+                grain.figure = figure;
+                if edited[3] {
+                    grain.pores = Some(pores);
+                }
+                if edited[4] {
+                    grain.streaks = Some(streaks);
+                }
+            }
             ui_kit::row(ui, app.tr("render.inspector_opacity"), |ui| {
                 let response =
                     ui_kit::mixed_slider(ui, &mut draft.opacity, 0.0..=1.0, mixed(&looks, |l| l.opacity).then(|| app.tr("render.tree_mixed")));
