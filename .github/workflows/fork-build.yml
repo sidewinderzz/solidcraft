@@ -1,0 +1,20 @@
+# Personal fork only (not for upstream): build every package from this branch, no release.
+name: Fork build
+
+on:
+  push:
+    branches: [wood-grain-build]
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    name: Packages
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      draft: false
+      packages_only: true
