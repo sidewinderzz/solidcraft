@@ -25,6 +25,12 @@ pub struct Grain {
     /// Where the log's centre (the pith) lies from the board's middle, mm: `[across its width,
     /// across its thickness]`. `[0, 0]`: rings centred on the board.
     pub pith_offset_mm: [f64; 2],
+    /// How strongly the rings show, relative to the species (1: as the species; 0: none).
+    pub contrast: f64,
+    /// Pore density, 0…1 (`None`: the species').
+    pub pores: Option<f64>,
+    /// How much dark streaking shows, 0…1 (`None`: the species').
+    pub streaks: Option<f64>,
 }
 
 /// Which way the grain runs.
@@ -40,7 +46,7 @@ impl Grain {
     /// The species' default grain.
     pub fn species(species: &str) -> Option<Grain> {
         wood::species_look(species)?;
-        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0] })
+        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], contrast: 1.0, pores: None, streaks: None })
     }
 
     /// Check the values (finite, in range, a known species).
@@ -63,6 +69,16 @@ impl Grain {
         if !self.pith_offset_mm.iter().all(|v| v.is_finite() && v.abs() <= MAX_PITH_MM) {
             return Err(format!("`grain.pith_offset_mm` must be within ±{MAX_PITH_MM} mm (past that the rings are straight lines)"));
         }
+        if !(self.contrast.is_finite() && (0.0..=3.0).contains(&self.contrast)) {
+            return Err("`grain.contrast` must be 0…3".into());
+        }
+        for (name, v) in [("pores", self.pores), ("streaks", self.streaks)] {
+            if let Some(v) = v
+                && !(v.is_finite() && (0.0..=1.0).contains(&v))
+            {
+                return Err(format!("`grain.{name}` must be 0…1"));
+            }
+        }
         if let GrainAxis::Fixed(v) = self.axis {
             let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
             if !(l.is_finite() && l > 1e-9) {
@@ -80,12 +96,40 @@ impl Grain {
             look.ring_mm = r as f32;
         }
         look.figure_mm *= self.figure as f32;
+        look.contrast = (look.contrast * self.contrast as f32).clamp(0.0, 1.0);
+        if let Some(v) = self.pores {
+            look.pores = v as f32;
+        }
+        if let Some(v) = self.streaks {
+            look.streaks = v as f32;
+        }
         let axis = match self.axis {
             GrainAxis::Long => Axis::Long,
             GrainAxis::Fixed(v) => Axis::Fixed(v),
         };
         let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm })?;
         Some(WoodShade { look, to_grain })
+    }
+
+    /// `shade` finished as its look says: tinted from the species' own colour (`species_colour`,
+    /// its starter preset's) toward the look's `colour`, and as glossy as the look's
+    /// `roughness` (the latewood a little rougher). A look left as the preset changes nothing
+    /// but the gloss it names.
+    pub fn finished(mut shade: WoodShade, species_colour: Option<[u8; 3]>, colour: [u8; 3], roughness: Option<f64>) -> WoodShade {
+        if let Some(from) = species_colour.filter(|from| *from != colour) {
+            let l = &mut shade.look;
+            for k in 0..3 {
+                let ratio = (f32::from(colour[k]) + 1.0) / (f32::from(from[k]) + 1.0);
+                for c in [&mut l.early, &mut l.late, &mut l.streak, &mut l.light] {
+                    c[k] = (c[k] * ratio).clamp(0.0, 1.0);
+                }
+            }
+        }
+        if let Some(r) = roughness {
+            let r = r as f32;
+            shade.look.roughness = [r.clamp(0.045, 1.0), (r + 0.08).clamp(0.045, 1.0)];
+        }
+        shade
     }
 
     /// Apply the fields of an `appearance.assign` `grain` object (or `true`: the defaults).
@@ -102,7 +146,12 @@ impl Grain {
                 "ring_spacing_mm" => self.ring_spacing_mm = Some(x.as_f64().ok_or("`grain.ring_spacing_mm` must be a number")?),
                 "figure" => self.figure = x.as_f64().ok_or("`grain.figure` must be a number")?,
                 "pith_offset_mm" => self.pith_offset_mm = parse_pith(x)?,
-                other => return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm)")),
+                "contrast" => self.contrast = x.as_f64().ok_or("`grain.contrast` must be a number")?,
+                "pores" => self.pores = Some(x.as_f64().ok_or("`grain.pores` must be a number")?),
+                "streaks" => self.streaks = Some(x.as_f64().ok_or("`grain.streaks` must be a number")?),
+                other => {
+                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, contrast, pores, streaks)"));
+                }
             }
         }
         self.validate()
@@ -173,6 +222,12 @@ struct GrainWire {
     figure: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pith_offset_mm: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    contrast: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pores: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    streaks: Option<f64>,
 }
 
 impl TryFrom<GrainWire> for Grain {
@@ -186,6 +241,9 @@ impl TryFrom<GrainWire> for Grain {
             ring_spacing_mm: w.ring_spacing_mm,
             figure: w.figure.unwrap_or(1.0),
             pith_offset_mm: w.pith_offset_mm.unwrap_or([0.0, 0.0]),
+            contrast: w.contrast.unwrap_or(1.0),
+            pores: w.pores,
+            streaks: w.streaks,
         };
         g.validate()?;
         Ok(g)
@@ -205,6 +263,9 @@ impl From<Grain> for GrainWire {
             ring_spacing_mm: g.ring_spacing_mm,
             figure: (g.figure != 1.0).then_some(g.figure),
             pith_offset_mm: (g.pith_offset_mm != [0.0, 0.0]).then_some(g.pith_offset_mm),
+            contrast: (g.contrast != 1.0).then_some(g.contrast),
+            pores: g.pores,
+            streaks: g.streaks,
         }
     }
 }
@@ -218,11 +279,11 @@ mod tests {
     fn grain_settings_round_trip_and_refuse_bad_values() {
         let mut g = Grain::species("starter.wood.walnut-dark").unwrap();
         assert_eq!(serde_json::to_value(&g).unwrap(), json!({"species": "walnut-dark"}));
-        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0]})).unwrap();
+        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
-        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"})] {
+        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"pores": 2})] {
             assert!(g.clone().apply_json(&bad).is_err(), "{bad}");
         }
         assert!(serde_json::from_value::<Grain>(json!({"species": "walnut-dark", "scale": 1e9})).is_err());
