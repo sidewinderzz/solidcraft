@@ -5,12 +5,12 @@
     "appearance.grain.figure": "Figure",
     "appearance.grain.pores": "Pores",
     "appearance.grain.streaks": "Streaks",
-    "appearance.grain.glued": "Glued-up boards",
-    "appearance.grain.glued_on": "Show as boards glued together",
+    "appearance.grain.glued": "Glue-up",
+    "appearance.grain.glued_on": "Glued from boards",
     "appearance.grain.stock_width": "Board width (mm)",
-    "appearance.grain.stock_length": "Board length (mm, 0: full length)",
-    "appearance.grain.position": "Grain position",
-    "appearance.grain.move": "Drag on the part to move the grain",
-    "appearance.grain.centre": "Centre"
+    "appearance.grain.stock_length": "Board length (mm, 0: full)",
+    "appearance.grain.position": "Move grain",
+    "appearance.grain.move": "Drag on the part",
+    "appearance.grain.centre": "Centre the grain"
   }
 }

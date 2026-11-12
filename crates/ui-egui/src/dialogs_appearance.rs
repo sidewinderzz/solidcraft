@@ -445,11 +445,8 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
             apply |= ended(&w, ui) || ended(&l, ui);
         }
         // Where the grain lies in the body: dragged in the view, or put back to the middle.
-        let mut centre = false;
-        ui_kit::row(ui, app.tr("appearance.grain.position"), |ui| {
-            ui_kit::checkbox(ui, app.tr("appearance.grain.move"), &mut k.move_grain);
-            centre = ui_kit::button(ui, app.tr("appearance.grain.centre"), ui_kit::Button::Normal).clicked();
-        });
+        ui_kit::row(ui, app.tr("appearance.grain.position"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.move"), &mut k.move_grain));
+        let centre = ui_kit::row(ui, "", |ui| ui_kit::button(ui, app.tr("appearance.grain.centre"), ui_kit::Button::Normal)).clicked();
         if centre {
             grain.remove("pith_offset_mm");
             grain.remove("shift_mm");

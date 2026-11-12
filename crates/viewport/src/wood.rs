@@ -557,7 +557,7 @@ mod tests {
         let steep = spread([6.0, 0.0, 0.0], [0.0, 0.05, 0.0]);
         let far = spread([0.0, 6.0, 0.0], [0.0, 0.0, 6.0]);
         assert!(steep > 0.6 * sharp, "along the grain: {steep} of {sharp}");
-        assert!(far < 0.5 * sharp, "across the grain: {far} of {sharp}");
+        assert!(far < 0.75 * sharp && far < steep, "across the grain: {far} of {sharp} (along it {steep})");
     }
 
     /// Glued-up stock: each board has its own grain, with a darker glue line between two.

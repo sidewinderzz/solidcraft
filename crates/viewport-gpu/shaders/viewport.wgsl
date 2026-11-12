@@ -635,7 +635,7 @@ fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
     // A wooden body keeps its grain under the selection colour.
     let w = wooded(i);
     var base = u.sel.rgb;
-    if ((i.h >> 8u) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.15); }
+    if ((i.h >> 8u) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.4); }
     return lit_color(i, 1.0, vec4<f32>(base, i.c.a));
 }
 
