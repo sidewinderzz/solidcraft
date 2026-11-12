@@ -1,0 +1,4 @@
+# Branches of this fork that .github/workflows/shelby-sync.yml merges into shelby-build, in this
+# order, after upstream main and shelby-setup. One per line; remove a branch once upstream has
+# merged it. Edit this file on shelby-setup.
+wood-grain
