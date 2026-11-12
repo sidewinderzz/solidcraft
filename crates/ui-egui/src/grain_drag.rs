@@ -1,6 +1,6 @@
 //! Dragging a wood's grain through its body: with the Appearance dialog's Move grain on, a
 //! left-button drag on a wooden body slides the grain with the pointer, in the plane of the
-//! grain's own directions that faces the view most squarely. Across the grain this moves the log's centre (the
+//! grain's own directions nearest the face grabbed. Across the grain this moves the log's centre (the
 //! pith) away from the board, so the board is cut from another part of the log; along the grain
 //! it slides the figure along the board. Each frame assigns the dialog's look with the new
 //! position; the whole drag is one undo step.
@@ -22,7 +22,7 @@ use crate::viewport::{Hit, Proj};
 #[derive(Clone, Debug)]
 pub struct Drag {
     /// The plane the pointer moves the grain in: through where it was grabbed, across the grain
-    /// direction the view looks along most.
+    /// direction the face grabbed looks along most.
     origin: Vec3,
     normal: Vec3,
     /// The body's grain directions (world): along the grain, across its width, across its
@@ -57,19 +57,21 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         other => [0.0, number(other)],
     };
     let shift = number(grain.get("shift_mm"));
-    let Some((body, at)) = crate::viewport::pick(app, proj, p).into_iter().find_map(|h| match h {
-        Hit::Face { body, point, .. } => Some((body, point)),
+    let Some((body, index, at)) = crate::viewport::pick(app, proj, p).into_iter().find_map(|h| match h {
+        Hit::Face { body, index, point } => Some((body, index, point)),
         _ => None,
     }) else {
         return false;
     };
     let state = crate::open_meshing::session_world(&app.session);
-    let Some(shade) = state.body(&body).and_then(|b| app.session.doc.model_body_wood(b)) else { return false };
+    let Some(b) = state.body(&body) else { return false };
+    let Some(shade) = app.session.doc.model_body_wood(b) else { return false };
     let axes = shade.to_grain.map(|r| Vec3::new(f64::from(r[0]), f64::from(r[1]), f64::from(r[2])).normalized().unwrap_or(Vec3::X));
-    // The grain moves in the plane of its own directions that faces the view most squarely: on a
-    // board's face along and across the board, on its end across its width and thickness.
-    let view = proj.ray(p).1;
-    let normal = axes.into_iter().fold(axes[0], |best, axis| if view.dot(axis).abs() > view.dot(best).abs() { axis } else { best });
+    // The grain moves in the plane of its own directions nearest the face grabbed (else the
+    // one facing the view): on a board's face along and across the board, on its end across
+    // its width and thickness.
+    let facing = crate::dialogs_assembly::face_normal_near(&b.mesh(), index as u32, at).unwrap_or(proj.ray(p).1);
+    let normal = axes.into_iter().fold(axes[0], |best, axis| if facing.dot(axis).abs() > facing.dot(best).abs() { axis } else { best });
     app.viewport.grain_drag = Some(Drag { origin: at, normal, axes, pith, shift, step: None });
     true
 }
