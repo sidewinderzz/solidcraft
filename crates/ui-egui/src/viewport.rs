@@ -4558,7 +4558,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
                 {
-                    if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
+                    // The Appearance dialog's picked bodies show the look they wear, not the
+                    // selection colour: they are outlined.
+                    let looked_at = matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Appearance(_)));
+                    if looked_at {
+                        let m = shown(b);
+                        for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
+                            edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                        }
+                    } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                         }
