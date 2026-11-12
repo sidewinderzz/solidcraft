@@ -598,6 +598,7 @@ fn scratch_geometry_reference(@builtin(global_invocation_id) gid:vec3<u32>){
                         surface: Some(white()),
                         transmission: None,
                         faces: Vec::new(),
+                        wood: None,
                     }],
                     bounds,
                 };

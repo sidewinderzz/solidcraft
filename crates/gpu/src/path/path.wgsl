@@ -1600,8 +1600,17 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         let map_record=texture_record(captured.optics.w);
         let gradients=texture_gradients(map_record,geometric,d,hit.distance,texture_path_length,bounce);
         let mapped_surface=texture_surface(map_record,captured.base.xyz,captured.parameters.x,captured.parameters.y,shading_position,gradients,(u32(captured.interior.z)&2u)!=0u);
+        // Procedural wood grain: its colour (sRGB, decoded) and roughness at this point.
+        var surface_color=mapped_surface.color;
+        var surface_roughness=mapped_surface.roughness;
+        let wood_slot=wood_record(captured.optics.w,(u32(captured.interior.z)&2u)!=0u);
+        if wood_slot!=0u {
+            let w=wood_sample(wood_slot,wood_grain(wood_slot,shading_position),vec3<f32>(0.0),vec3<f32>(0.0));
+            surface_color=select(w.rgb/12.92,pow((w.rgb+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),w.rgb>vec3<f32>(0.04045));
+            surface_roughness=w.w;
+        }
         // Retain immutable geometry and medium data across optical map evaluation.
-        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior,captured.glass);
+        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(surface_color,captured.base.w),vec4<f32>(mapped_surface.metallic,surface_roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior,captured.glass);
         let t=aged_surface(textured,shading_position,outward);
         let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
         let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);

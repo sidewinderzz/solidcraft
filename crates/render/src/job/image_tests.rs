@@ -48,7 +48,7 @@ fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMes
         tri_face: vec![0, 1],
         ..Default::default()
     };
-    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, transmission: None, faces: Vec::new() }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity, surface: None, transmission: None, faces: Vec::new(), wood: None }
 }
 
 fn scene(meshes: Vec<ProductMesh>) -> ProductScene {
@@ -166,7 +166,7 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
         if bad == 0 {
             Arc::make_mut(&mut body.mesh).triangles[0][0] = u32::MAX;
         } else {
-            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None, transmission: None });
+            body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None, transmission: None, wood: None });
         }
         let error = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).err().unwrap();
         assert_eq!(error.code, ErrorCode::InvalidScene);
@@ -233,7 +233,7 @@ fn registered_executor_geometry_admission_excludes_the_cpu_raster_estimate() {
     // largest image. Its CPU raster estimate is above 384 MiB at a registered executor's cap.
     let count = (120 * 1024 * 1024 / std::mem::size_of::<FaceAppearance>()).min(1_000_000);
     let mut body = square("appearances", [200; 3], 1.0, Vec3::ZERO);
-    body.faces = vec![FaceAppearance { transmission: None, face: 0, color: [200; 3], opacity: 1.0, surface: None }; count];
+    body.faces = vec![FaceAppearance { transmission: None, face: 0, color: [200; 3], opacity: 1.0, surface: None, wood: None }; count];
     let source = scene(vec![body]);
     let mut r = request();
     r.width = 2048;
@@ -298,9 +298,9 @@ fn pixel_work_ignores_invisible_triangles_and_respects_the_last_face_override() 
     let mut body = square("Hidden", [100; 3], 0.0, Vec3::ZERO);
     let request = request();
     assert_eq!(admit(&scene(vec![body.clone()]), &request).unwrap().projected_pixel_tests, Some(0));
-    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.55, surface: None, transmission: None });
+    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.55, surface: None, transmission: None, wood: None });
     assert!(admit(&scene(vec![body.clone()]), &request).unwrap().projected_pixel_tests.unwrap() > 0);
-    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.0, surface: None, transmission: None });
+    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.0, surface: None, transmission: None, wood: None });
     assert_eq!(admit(&scene(vec![body]), &request).unwrap().projected_pixel_tests, Some(0));
 
     let offscreen = square("Offscreen", [100; 3], 1.0, Vec3::new(10_000.0, 0.0, 0.0));
