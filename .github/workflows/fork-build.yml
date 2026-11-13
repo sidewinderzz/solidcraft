@@ -62,7 +62,9 @@ jobs:
           base=$(awk '/^\[/ { p = ($0 == "[workspace.package]"); next } p && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }' Cargo.toml)
           base=${base%%-*}
           IFS=. read -r major minor patch <<<"$base"
-          version="$major.$minor.$((patch * 1000 + GITHUB_RUN_NUMBER))"
+          # +10: this workflow replaced an earlier one whose runs already published v0.40.1 and
+          # v0.40.2, and the updater only offers a higher version.
+          version="$major.$minor.$((patch * 1000 + GITHUB_RUN_NUMBER + 10))"
           case "$ARCH" in
             both) arches='["x64","arm64"]' ;;
             *) arches="[\"$ARCH\"]"; PUBLISH=false ;;
