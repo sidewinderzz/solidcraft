@@ -166,6 +166,7 @@ fn nested_media_camera_inside_before_opaque_geometry_attenuates_the_visible_emit
             surface: Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.5, 1.0).unwrap()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         };
         let mut image = request(4);
         image.camera.fov = 0.0; // Orthographic rays all have the same exact axial lengths.
