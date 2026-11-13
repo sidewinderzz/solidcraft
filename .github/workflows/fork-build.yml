@@ -1,6 +1,6 @@
 # Personal fork only (sidewinderzz/solidcraft), never for upstream.
 #
-# Builds SolidCraft for Windows x64 and arm64 from the shelby-build branch (which shelby-sync.yml
+# Builds SolidCraft for Windows x64 and arm64 from the fork-build branch (which fork-sync.yml
 # makes) and publishes a GitHub Release on this fork. The app on this branch checks this fork's releases for updates
 # (crates/ui-egui/src/update.rs), so an installed copy offers "Update now" for every new build.
 #
@@ -14,11 +14,11 @@
 # Versions: the upstream version without its suffix, with the patch number widened by this
 # workflow's run number (0.40.0-rc.3 on run 12 -> 0.40.12), so every build is a newer stable
 # version to the update check and to the MSI installer.
-name: Shelby build
+name: Fork build
 
 on:
   push:
-    branches: [shelby-build]
+    branches: [fork-build]
   workflow_dispatch:
     inputs:
       arch:
@@ -35,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shelby-build
+  group: fork-build
   cancel-in-progress: true
 
 env:
@@ -68,7 +68,7 @@ jobs:
             *) arches="[\"$ARCH\"]"; PUBLISH=false ;;
           esac
           { echo "version=$version"; echo "arches=$arches"; echo "publish=$PUBLISH"; } >>"$GITHUB_OUTPUT"
-          echo "### SolidCraft $version (Shelby build, \`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
+          echo "### SolidCraft $version (fork build, \`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
 
   windows:
     name: Windows ${{ matrix.arch }}
@@ -99,7 +99,7 @@ jobs:
       # Downloaded crates only; compiled output is sccache's job.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: shelby-windows-${{ matrix.arch }}
+          key: fork-windows-${{ matrix.arch }}
           cache-targets: false
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - name: Install WiX
@@ -122,7 +122,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: shelby-windows-${{ matrix.arch }}
+          name: fork-windows-${{ matrix.arch }}
           path: dist/release/*
           if-no-files-found: error
           retention-days: 14
@@ -140,7 +140,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: shelby-windows-*
+          pattern: fork-windows-*
           path: artifacts
           merge-multiple: true
       - name: Fixed names and checksums
@@ -156,17 +156,27 @@ jobs:
         working-directory: artifacts
         run: |
           {
-            echo "Personal build of the \`shelby-build\` branch at ${GITHUB_SHA::9}: upstream SolidCraft plus the branches in \`.github/shelby-build-branches.txt\`."
+            echo "Build of the \`fork-build\` branch at ${GITHUB_SHA::9}: upstream SolidCraft plus the branches in \`.github/fork-build-branches.txt\`."
             echo
             echo "Install \`solidcraft-windows-arm64.msi\` or \`solidcraft-windows-x64.msi\`. Installed copies offer **Update now** when the next build is published."
             echo
             echo "Changes: https://github.com/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"
           } >notes.md
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "SolidCraft $VERSION (Shelby build)" --notes-file notes.md --latest \
+            --title "SolidCraft $VERSION (fork build)" --notes-file notes.md --latest \
             $(ls | grep -v '^notes.md$')
       - name: Keep the last 5 releases
         run: |
           gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
             --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
             while read -r tag; do gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
+      - name: Neutral titles and notes on older releases
+        run: |
+          # Older releases used a different title and notes; give them this build's wording.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,name \
+            --jq '.[] | select(.name | endswith("(fork build)") | not) | .tagName' |
+            while read -r tag; do
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+                --title "SolidCraft ${tag#v} (fork build)" \
+                --notes "Build of this fork of SolidCraft (${tag}). Superseded by newer builds."
+            done

@@ -1,0 +1,4 @@
+# Branches of this fork that .github/workflows/fork-sync.yml merges into fork-build, in this
+# order, after upstream main and fork-setup. One per line; remove a branch once upstream has
+# merged it. Edit this file on fork-setup.
+wood-grain

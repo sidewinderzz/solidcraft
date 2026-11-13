@@ -29,8 +29,8 @@ use crate::SolveApp;
 use crate::ui_kit;
 use solidcraft_theme::Tokens;
 
-/// The repository releases come from. Personal fork build: this copy updates from the fork's
-/// own releases (built by .github/workflows/shelby-build.yml), not from upstream.
+/// The repository releases come from. Fork build: this copy updates from the fork's
+/// own releases (built by .github/workflows/fork-build.yml), not from upstream.
 pub const REPO: &str = "sidewinderzz/solidcraft";
 /// The one request an update check makes.
 pub const LATEST_API: &str = "https://api.github.com/repos/sidewinderzz/solidcraft/releases/latest";

@@ -1,21 +1,21 @@
 # Personal fork only (sidewinderzz/solidcraft), never for upstream.
 #
-# Rebuilds the shelby-build branch from scratch: upstream SolidCraft's main
-# (tangency-labs/solidcraft), plus the shelby-setup branch (these workflows and the fork's update
-# settings), plus every branch listed in .github/shelby-build-branches.txt on shelby-setup.
-# When the result differs from shelby-build, it replaces shelby-build, and that push starts
-# "Shelby build". shelby-build is only ever made this way, so feature branches may be rebased
-# freely; change shelby-setup or the feature branches, never shelby-build itself.
+# Rebuilds the fork-build branch from scratch: upstream SolidCraft's main
+# (tangency-labs/solidcraft), plus the fork-setup branch (these workflows and the fork's update
+# settings), plus every branch listed in .github/fork-build-branches.txt on fork-setup.
+# When the result differs from fork-build, it replaces fork-build, and that push starts
+# "Fork build". fork-build is only ever made this way, so feature branches may be rebased
+# freely; change fork-setup or the feature branches, never fork-build itself.
 #
 # When a branch conflicts with the newest upstream main, the build falls back to the newest
 # upstream commit that every branch already contains (with a warning naming the branch to
 # rebase). Only when that fails too does the run stop and fail (GitHub emails a failed run),
-# leaving shelby-build as it was.
+# leaving fork-build as it was.
 #
 # Needs the SYNC_TOKEN secret: a fine-grained token for this repository only, with Contents and
 # Workflows read and write. GITHUB_TOKEN can't do this job: GitHub refuses its pushes when
 # upstream changed a workflow file, and its pushes never start other workflows.
-name: Shelby sync
+name: Fork sync
 
 on:
   schedule:
@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shelby-sync
+  group: fork-sync
   cancel-in-progress: false
 
 jobs:
@@ -43,18 +43,18 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: shelby-setup
+          ref: fork-setup
           fetch-depth: 0
           filter: blob:none
           token: ${{ secrets.SYNC_TOKEN }}
-      - name: Rebuild shelby-build
+      - name: Rebuild fork-build
         run: |
-          git config user.name "shelby-build sync"
+          git config user.name "fork-build sync"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/tangency-labs/solidcraft.git
           git fetch --no-tags upstream main
-          git fetch --no-tags origin shelby-setup
-          git show origin/shelby-setup:.github/shelby-build-branches.txt >"$RUNNER_TEMP/branches.txt"
+          git fetch --no-tags origin fork-setup
+          git show origin/fork-setup:.github/fork-build-branches.txt >"$RUNNER_TEMP/branches.txt"
 
           branches=()
           while read -r branch; do
@@ -63,12 +63,12 @@ jobs:
             branches+=("$branch")
           done <"$RUNNER_TEMP/branches.txt"
 
-          # Upstream main, then shelby-setup, then each branch. Returns 1 on the first conflict.
+          # Upstream main, then fork-setup, then each branch. Returns 1 on the first conflict.
           rebuild() { # <base> <label>
             git checkout -q -f -B next "$1"
             echo "- $2: $(git rev-parse --short=9 HEAD)" >>"$GITHUB_STEP_SUMMARY"
             local ref label sha files
-            for label in shelby-setup "${branches[@]}"; do
+            for label in fork-setup "${branches[@]}"; do
               ref="origin/$label"
               sha=$(git rev-parse --short=9 "$ref")
               if git merge --no-edit -m "Merge $label ($sha)" "$ref"; then
@@ -87,7 +87,7 @@ jobs:
           if ! rebuild upstream/main "upstream main"; then
             # A branch doesn't merge with the newest upstream yet: build on the newest upstream
             # commit every branch already contains instead, so the build keeps every branch.
-            base=$(git merge-base --octopus upstream/main origin/shelby-setup "${branches[@]/#/origin/}")
+            base=$(git merge-base --octopus upstream/main origin/fork-setup "${branches[@]/#/origin/}")
             echo "Falling back to the upstream commit every branch is based on:" >>"$GITHUB_STEP_SUMMARY"
             if ! rebuild "$base" "upstream main at $(git rev-parse --short=9 "$base")"; then
               echo "::error::The branches conflict with each other or with upstream; nothing was pushed."
@@ -96,10 +96,10 @@ jobs:
             echo "::warning::Built on an older upstream commit; rebase the conflicting branch onto upstream main to catch up."
           fi
 
-          if git fetch --no-tags origin shelby-build 2>/dev/null &&
-             [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'origin/shelby-build^{tree}')" ]; then
+          if git fetch --no-tags origin fork-build 2>/dev/null &&
+             [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'origin/fork-build^{tree}')" ]; then
             echo "Nothing new: no build." >>"$GITHUB_STEP_SUMMARY"
           else
-            git push --force origin HEAD:shelby-build
-            echo "Pushed $(git rev-parse --short=9 HEAD) to shelby-build: Shelby build starts from this push." >>"$GITHUB_STEP_SUMMARY"
+            git push --force origin HEAD:fork-build
+            echo "Pushed $(git rev-parse --short=9 HEAD) to fork-build: Fork build starts from this push." >>"$GITHUB_STEP_SUMMARY"
           fi
