@@ -95,6 +95,14 @@ jobs:
             echo "::warning::Built on an older upstream commit; rebase the conflicting branch onto upstream main to catch up."
           fi
 
+          # Git can merge Cargo.lock cleanly yet leave it out of step with the merged Cargo.toml
+          # files; the build runs with --locked, so bring the lock file up to date here.
+          if ! cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
+            cargo metadata --format-version 1 >/dev/null
+            git commit -q -am "Refresh Cargo.lock after merging"
+            echo "- Cargo.lock refreshed after merging" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
           if git fetch --no-tags origin fork-build 2>/dev/null &&
              [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'origin/fork-build^{tree}')" ]; then
             echo "Nothing new: no build." >>"$GITHUB_STEP_SUMMARY"
