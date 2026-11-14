@@ -467,6 +467,7 @@ mod tests {
             hatch: Default::default(),
             wood: None,
             face_woods: Vec::new(),
+            values: None,
         };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],

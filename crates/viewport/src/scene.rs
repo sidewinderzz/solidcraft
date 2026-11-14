@@ -38,12 +38,15 @@ pub struct SceneMesh {
     pub wood: Option<crate::wood::WoodShade>,
     /// Faces with wood of their own: (B-rep face index, wood).
     pub face_woods: Vec<(u32, crate::wood::WoodShade)>,
+    /// A value at each of the mesh's positions, in order (a measured curvature, say), that
+    /// [`crate::AnalysisMode::Values`] colours the body by; `None` for a body without.
+    pub values: Option<Arc<Vec<f32>>>,
 }
 
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), wood: None, face_woods: Vec::new() }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), wood: None, face_woods: Vec::new(), values: None }
     }
 
     /// The wood on triangle face `face`, if any: the face's own, else the body's (unless the
