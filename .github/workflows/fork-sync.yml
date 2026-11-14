@@ -45,7 +45,6 @@ jobs:
         with:
           ref: fork-setup
           fetch-depth: 0
-          filter: blob:none
           token: ${{ secrets.SYNC_TOKEN }}
       - name: Rebuild fork-build
         run: |
