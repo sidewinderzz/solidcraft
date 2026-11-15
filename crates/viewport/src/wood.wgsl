@@ -51,7 +51,7 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
     let s = u32(wood_texel(slot, 4u).x);
     let stock = wood_texel(slot, 8u);
     let ply = wood_texel(slot, 10u);
-    let ring_mm = early.w;
+    let wild = wood_texel(slot, 9u);
     let contrast = late_c.w;
     let figure_mm = streak_c.w;
     var fx = fx_in;
@@ -61,6 +61,7 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
     var g = g_in;
     var seam = 0.0;
     var tone = 1.0;
+    var grew = wood_hash(0, 0, 9, s);
     var end = 0.0;
     if (ply.x > 0.0) {
         let tp = ply.x;
@@ -119,9 +120,58 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
         let line_mm = 0.15 + max(across, along);
         seam = 0.45 * (1.0 - wood_smooth(0.0, line_mm, edge)) * (0.15 / line_mm);
         tone = 0.93 + 0.14 * h4;
+        grew = wood_hash(ji, ii, 5, s ^ 0x2545f491u);
         var side = 1.0;
         if (h3 < 0.5) { side = -1.0; }
         g = vec3<f32>(g.x + 40000.0 * h3, yl - stock.z - (h1 - 0.5) * wide * 1.2, g.z - side * (15.0 + 120.0 * h2));
+    }
+    let vary = clamp(wild.x, 0.0, 2.0);
+    let ring_mm = early.w * mix(1.0, 0.7 + 0.7 * grew, min(vary, 1.0));
+    var lift = 0.0;
+    var knot = 0.0;
+    var kd = 0.0;
+    if (wild.y > 0.0) {
+        let cell = floor(g.x / 300.0);
+        let ci = i32(cell);
+        if (wood_hash(ci, 1, 11, s ^ 0x7f4a7c15u) < wild.y) {
+            let h1 = wood_hash(ci, 2, 11, s ^ 0x7f4a7c15u);
+            let h2 = wood_hash(ci, 3, 11, s ^ 0x7f4a7c15u);
+            let h3 = wood_hash(ci, 4, 11, s ^ 0x7f4a7c15u);
+            let h4 = wood_hash(ci, 5, 11, s ^ 0x7f4a7c15u);
+            let ay = 2.0 * h2 - 1.0;
+            var az = sqrt(max(1.0 - ay * ay, 0.0));
+            if (h3 < 0.5) { az = -az; }
+            let out = g.y * ay + g.z * az;
+            let side = g.z * ay - g.y * az;
+            let u = g.x - (cell + 0.3 + 0.4 * h1) * 300.0;
+            let rk = (3.0 + 9.0 * h4) * (0.4 + 0.6 * wood_smooth(0.0, 120.0, out));
+            let there = wood_smooth(0.0, 8.0, out);
+            kd = sqrt(u * u + side * side) / rk;
+            let far = sqrt(u * u * 0.36 + side * side) / rk;
+            lift = there * 1.3 * rk * (1.0 - wood_smooth(0.3, 4.5, far));
+            knot = there * (1.0 - wood_smooth(0.85, 1.05, kd));
+        }
+    }
+    if (wild.z > 0.0) {
+        let b1 = g / 34.0;
+        let b2 = g / 12.0;
+        let sy = 22.0 * (wood_noise(b1, s ^ 0x3243f6a8u) - 0.5) + 7.0 * (wood_noise(b2, s ^ 0x85a308d3u) - 0.5);
+        let sz = 22.0 * (wood_noise(vec3<f32>(b1.x + 19.0, b1.y + 7.0, b1.z + 43.0), s ^ 0x13198a2eu) - 0.5) + 7.0 * (wood_noise(vec3<f32>(b2.x + 13.0, b2.y + 37.0, b2.z + 5.0), s ^ 0x03707344u) - 0.5);
+        g = vec3<f32>(g.x, g.y + wild.z * sy, g.z + wild.z * sz);
+        let e = floor(g / 30.0);
+        let ex = i32(e.x);
+        let ey = i32(e.y);
+        let ez = i32(e.z);
+        if (wood_hash(ex, ey, ez, s ^ 0xa4093822u) < 0.35 + 0.6 * wild.z) {
+            let c = vec3<f32>(0.35 + 0.3 * wood_hash(ex, ey, ez, s ^ 0x299f31d0u), 0.35 + 0.3 * wood_hash(ex, ey, ez, s ^ 0x082efa98u), 0.35 + 0.3 * wood_hash(ex, ey, ez, s ^ 0xec4e6c89u));
+            let re = 1.2 + 2.2 * wood_hash(ex, ey, ez, s ^ 0x452821e6u);
+            let d = g - (e + c) * 30.0;
+            let ed = sqrt(d.x * d.x + d.y * d.y + d.z * d.z) / re;
+            let eye = min(wild.z, 1.0) * (1.0 - wood_smooth(0.0, 3.0, ed));
+            lift = lift + 3.0 * re * eye;
+            knot = max(knot, min(wild.z, 1.0) * (1.0 - wood_smooth(0.5, 1.0, ed)));
+            if (ed < 1.0) { kd = ed; }
+        }
     }
     let w = wood_scaled(g, 0.004, 0.02);
     let dy = wood_noise(w, s) - 0.5;
@@ -135,10 +185,40 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
     let fr = (abs(y * fx.y + z * fx.z) + abs(y * fy.y + z * fy.z)) / (max(r, 1.0e-3) * ring_mm);
     let rings = 1.0 - wood_smooth(0.35, 1.0, fr);
     let thin = 1.0 - wood_smooth(0.08, 0.35, fr);
-    let ring = r / ring_mm + 0.6 * (wood_noise(wood_scaled(vec3<f32>(g.x, y, z), 0.01, 0.04), s ^ 0x85ebca6bu) - 0.5);
-    let t = ring - floor(ring);
+    let uy = y / (r + 1.0e-3);
+    let uz = z / (r + 1.0e-3);
+    let lobe = wood_noise(vec3<f32>(g.x * 0.0015 + 3.0, 1.3 * uy + 7.0, 1.3 * uz + 13.0), s ^ 0x243f6a88u) - 0.5;
+    let lobe2 = wood_noise(vec3<f32>(g.x * 0.004 + 11.0, 3.1 * uy + 5.0, 3.1 * uz + 29.0), s ^ 0xb7e15162u) - 0.5;
+    let rr = r * (1.0 + vary * (0.22 * lobe + 0.07 * lobe2 * wood_smooth(5.0, 60.0, r))) + vary * 0.006 * g.x - lift;
+    let ring0 = rr / ring_mm;
+    let decade = wood_noise(vec3<f32>(ring0 * 0.11 + 3.0, g.x * 0.0008, 2.0 * uy + 2.0 * uz), s ^ 0x13c6ef37u) - 0.5;
+    let year = wood_noise(vec3<f32>(ring0 * 0.37 + 9.0, g.x * 0.0015, 3.0 * uy - 3.0 * uz), s ^ 0x5be0cd19u) - 0.5;
+    let ring = ring0
+        + vary * (3.6 * decade + 0.7 * year)
+        + 0.6 * (wood_noise(wood_scaled(vec3<f32>(g.x, y, z), 0.01, 0.04), s ^ 0x85ebca6bu) - 0.5)
+        + 0.25 * vary * (wood_noise(wood_scaled(vec3<f32>(g.x, y, z), 0.03, 0.12), s ^ 0x1b873593u) - 0.5);
+    let jitter = 0.6 * min(vary, 1.5);
+    let n0 = floor(ring);
+    let ni = i32(n0);
+    let e0 = n0 + jitter * (wood_hash(ni, 0, 7, s ^ 0x6c62272eu) - 0.5);
+    let e1 = (n0 + 1.0) + jitter * (wood_hash(ni + 1, 0, 7, s ^ 0x6c62272eu) - 0.5);
+    var lo = e0;
+    var hi = e1;
+    var nr = ni;
+    if (ring < e0) {
+        lo = (n0 - 1.0) + jitter * (wood_hash(ni - 1, 0, 7, s ^ 0x6c62272eu) - 0.5);
+        hi = e0;
+        nr = ni - 1;
+    } else if (ring >= e1) {
+        lo = e1;
+        hi = (n0 + 2.0) + jitter * (wood_hash(ni + 2, 0, 7, s ^ 0x6c62272eu) - 0.5);
+        nr = ni + 1;
+    }
+    let t = clamp((ring - lo) / (hi - lo), 0.0, 1.0);
+    let share = mix(0.55, 0.3 + 0.5 * wood_hash(nr, 1, 7, s ^ 0x6c62272eu), min(vary, 1.0));
+    let depth = mix(1.0, 0.5 + 0.7 * wood_hash(nr, 2, 7, s ^ 0x6c62272eu), min(vary, 1.0));
     let wrap = 1.0 - wood_smooth(1.0 - clamp(fr, 0.02, 0.5), 1.0, t);
-    let late = mix(0.25, wood_smooth(0.55, 0.95, t) * wrap, rings) * contrast;
+    let late = mix(0.25, min(wood_smooth(share, 0.95, t) * wrap * depth, 1.0), rings) * contrast;
     let q = vec3<f32>(g.x, y, z);
     let light = wood_texel(slot, 4u).yzw;
     let around = 20.0 * y / (r + 1.0);
@@ -152,11 +232,13 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
     let fibre = mix(1.0, 0.92 + 0.16 * wood_noise(wood_scaled(q, 0.03, 1.2), s ^ 0x3c6ef372u), coarse)
         * mix(1.0, 0.94 + 0.12 * wood_noise(wood_scaled(q, 0.05, 4.0), s ^ 0xbb67ae85u), fine)
         * mix(1.0, 0.95 + 0.1 * wood_noise(wood_scaled(q, 0.012, 0.45), s ^ 0xa54ff53au), mid);
-    let line = wood_smooth(0.88, 0.97, t) * wrap * thin * contrast;
+    let line = wood_smooth(0.88, 0.97, t) * wrap * thin * contrast * min(depth, 1.0);
     let ripple = mix(1.0, 0.95 + 0.1 * wood_noise(wood_scaled(g, 0.06, 0.012), s ^ 0x1f83d9abu), 1.0 - wood_smooth(5.0, 16.0, along));
     let base = mix(mix(early.xyz, light, zone), late_c.xyz, late);
     let streaked = mix(base, streak_c.xyz, streak);
-    let flecked = mix(streaked, light, 0.35 * fleck);
+    let knot_ring = max(wood_smooth(0.5, 1.0, abs(kd * 4.0 - floor(kd * 4.0) - 0.5) * 2.0), wood_smooth(0.7, 1.0, kd));
+    let flecked0 = mix(streaked, light, 0.35 * fleck);
+    let flecked = mix(flecked0, late_c.xyz * mix(streak_c.xyz, vec3<f32>(1.0), 0.45), knot * (0.75 + 0.25 * knot_ring));
     let c = clamp(flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mix(vec3<f32>(1.0), vec3<f32>(0.80, 0.72, 0.62), end), vec3<f32>(0.0), vec3<f32>(1.0));
     let roughness = clamp(mix(k.z, k.w, late / max(contrast, 1e-3)) + 0.08 * pore, 0.02, 1.0);
     return vec4<f32>(c, roughness);

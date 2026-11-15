@@ -99,6 +99,10 @@ fn the_gpu_wood_matches_the_cpu_wood() {
         if species.id.len() % 2 == 0 {
             shade.look.stock = [30.0, 250.0, 4.0];
         }
+        // And some with knots, some as burl, some with even rings.
+        shade.look.knots = [0.0, 1.0, 0.6][species.id.len() % 3];
+        shade.look.burl = [0.0, 0.0, 1.0, 0.5][species.id.len() % 4];
+        shade.look.variation = [1.0, 2.0, 0.0, 1.0, 0.5][species.id.len() % 5];
         let gpu = gpu_samples(&device, &queue, &shade, &points);
         let mut off = 0;
         let mut worst = 0f32;
