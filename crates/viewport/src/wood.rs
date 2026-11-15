@@ -86,22 +86,40 @@ const fn raw(id: &'static str, finished: &Species) -> Species {
     let l = finished.look;
     Species {
         id,
-        look: WoodLook { early: dull(l.early), late: dull(l.late), streak: dull(l.streak), light: dull(l.light), contrast: l.contrast * 0.8, streaks: l.streaks * 0.8, roughness: [0.80, 0.88], ..l },
+        look: WoodLook {
+            early: dull(l.early),
+            late: dull(l.late),
+            streak: dull(l.streak),
+            light: dull(l.light),
+            contrast: l.contrast * 0.8,
+            streaks: l.streaks * 0.8,
+            roughness: [0.80, 0.88],
+            ..l
+        },
     }
 }
 
-const OAK_HONEY: Species = species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]);
-const OAK_SMOKED: Species = species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]);
+const OAK_HONEY: Species =
+    species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]);
+const OAK_SMOKED: Species =
+    species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]);
 // Walnut with a clear finish: warm chocolate heartwood, amber zones, near-black streaks, open
 // pores (no sapwood band).
-const WALNUT: Species = species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(56, 36, 27), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.45, [0.30, 0.38]);
+const WALNUT: Species =
+    species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(56, 36, 27), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.45, [0.30, 0.38]);
 // Raw walnut is its own colours: a cool grey-brown with a faint purple cast.
-const WALNUT_RAW: Species = species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.35, [0.80, 0.88]);
-const MAPLE: Species = species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]);
-const CHERRY: Species = species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]);
-const ASH: Species = species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
-const BIRCH: Species = species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]);
-const TEAK: Species = species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]);
+const WALNUT_RAW: Species =
+    species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.35, [0.80, 0.88]);
+const MAPLE: Species =
+    species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]);
+const CHERRY: Species =
+    species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]);
+const ASH: Species =
+    species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
+const BIRCH: Species =
+    species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]);
+const TEAK: Species =
+    species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]);
 
 /// The starter species, in the starter pack's order: each with a clear finish (`oak-honey`) and
 /// as raw timber (`oak-honey-raw`).
@@ -325,9 +343,14 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let mid = 1.0 - smoothstep(0.8, 2.5, across);
     // Pores: the cut vessels, short dark dashes along the grain (dots on end grain), mostly in
     // the earlywood.
-    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.1, 1.8), s ^ 0x27d4_eb2f)) * l.pores.min(1.0) * (1.0 - 0.5 * late) * coarse * (1.0 - smoothstep(3.0, 10.0, along));
+    let pore = smoothstep(1.0 - 0.3 * l.pores, 1.0, noise(scaled(q, 0.1, 1.8), s ^ 0x27d4_eb2f))
+        * l.pores.min(1.0)
+        * (1.0 - 0.5 * late)
+        * coarse
+        * (1.0 - smoothstep(3.0, 10.0, along));
     // Ray flecks: short pale ticks.
-    let fleck = smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * coarse * (1.0 - smoothstep(1.0, 3.3, along));
+    let fleck =
+        smoothstep(0.8, 0.97, noise(scaled(q, 0.3, 1.6), s ^ 0x6a09_e667)) * (0.25 + 0.5 * l.pores) * coarse * (1.0 - smoothstep(1.0, 3.3, along));
     // Fibres along the grain: coarse, fine, and broad soft ones that still show from afar.
     let fibre = mixf(1.0, 0.92 + 0.16 * noise(scaled(q, 0.03, 1.2), s ^ 0x3c6e_f372), coarse)
         * mixf(1.0, 0.94 + 0.12 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85), fine)
@@ -444,7 +467,13 @@ pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) 
 // The largest and the smallest eigenvector of a symmetric 3×3 matrix (power iteration, from
 // fixed starts, so the same input always gives the same frame).
 fn principal(m: [[f64; 3]; 3]) -> (Vec3, Vec3) {
-    let apply = |m: &[[f64; 3]; 3], v: Vec3| Vec3::new(m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z, m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z, m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z);
+    let apply = |m: &[[f64; 3]; 3], v: Vec3| {
+        Vec3::new(
+            m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+            m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+            m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z,
+        )
+    };
     let power = |m: &[[f64; 3]; 3]| {
         // Start from the matrix's largest column, so the start is never orthogonal to the answer.
         let cols = [Vec3::new(m[0][0], m[1][0], m[2][0]), Vec3::new(m[0][1], m[1][1], m[2][1]), Vec3::new(m[0][2], m[1][2], m[2][2])];
@@ -477,8 +506,10 @@ mod tests {
     fn board() -> (Vec<Vec3>, Vec<[u32; 3]>) {
         // A 600 × 100 × 20 box along X.
         let (x, y, z) = (600.0, 100.0, 20.0);
-        let p: Vec<Vec3> = (0..8).map(|i| Vec3::new(if i & 1 == 0 { 0.0 } else { x }, if i & 2 == 0 { 0.0 } else { y }, if i & 4 == 0 { 0.0 } else { z })).collect();
-        let t = vec![[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4], [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]];
+        let p: Vec<Vec3> =
+            (0..8).map(|i| Vec3::new(if i & 1 == 0 { 0.0 } else { x }, if i & 2 == 0 { 0.0 } else { y }, if i & 4 == 0 { 0.0 } else { z })).collect();
+        let t =
+            vec![[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4], [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]];
         (p, t)
     }
 

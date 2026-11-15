@@ -115,7 +115,14 @@ impl Material {
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new(), seconds: Vec::new(), materials: Vec::new() }
+        Palette {
+            stable_len: entries.len(),
+            entries,
+            lookup: std::collections::HashMap::new(),
+            hatches: Vec::new(),
+            seconds: Vec::new(),
+            materials: Vec::new(),
+        }
     }
 
     /// This palette with PBR `materials` by index.

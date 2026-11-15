@@ -1581,7 +1581,14 @@ fn captured_clear_coat_keeps_direct_shading_but_refuses_unmatched_cpu_transport(
     request.raytrace = Some(options.clone());
     assert!(admit(&scene, &request, &options).unwrap_err().message.contains("clear-coat transport"));
     scene.meshes[0].surface = None;
-    scene.meshes[0].faces.push(crate::FaceAppearance { face: 0, color: [255; 3], opacity: 1.0, surface: Some(surface), transmission: None, wood: None });
+    scene.meshes[0].faces.push(crate::FaceAppearance {
+        face: 0,
+        color: [255; 3],
+        opacity: 1.0,
+        surface: Some(surface),
+        transmission: None,
+        wood: None,
+    });
     assert!(admit(&scene, &request, &options).unwrap_err().message.contains("clear-coat transport"));
 }
 

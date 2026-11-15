@@ -998,7 +998,10 @@ fn wood_grain_settings_survive_undo_save_reopen_and_copy_paste() {
     )
     .unwrap();
     let grain = s.doc.appearances.bodies["Specimen"].grain.clone().expect("walnut has grain");
-    assert_eq!(serde_json::to_value(&grain).unwrap(), json!({"species":"walnut-dark","axis":[0.0,1.0,0.0],"seed":42,"scale":1.25,"ring_spacing_mm":5.5,"figure":0.5}));
+    assert_eq!(
+        serde_json::to_value(&grain).unwrap(),
+        json!({"species":"walnut-dark","axis":[0.0,1.0,0.0],"seed":42,"scale":1.25,"ring_spacing_mm":5.5,"figure":0.5})
+    );
     // Every consumer sees the same wood: the model scene, the product (render job) scene.
     let scene = product_scene::extract(&s).unwrap();
     let wood = scene.meshes.iter().find(|m| m.name == "Specimen").and_then(|m| m.wood).expect("render jobs get the wood");

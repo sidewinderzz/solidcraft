@@ -52,7 +52,20 @@ impl Grain {
     /// The species' default grain.
     pub fn species(species: &str) -> Option<Grain> {
         wood::species_look(species)?;
-        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], shift_mm: 0.0, stock_mm: None, contrast: 1.0, pores: None, streaks: None })
+        Some(Grain {
+            species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(),
+            axis: GrainAxis::Long,
+            seed: None,
+            scale: 1.0,
+            ring_spacing_mm: None,
+            figure: 1.0,
+            pith_offset_mm: [0.0, 0.0],
+            shift_mm: 0.0,
+            stock_mm: None,
+            contrast: 1.0,
+            pores: None,
+            streaks: None,
+        })
     }
 
     /// Check the values (finite, in range, a known species).
@@ -126,7 +139,8 @@ impl Grain {
             let s = 1.0 / self.scale.clamp(0.01, 100.0);
             look.stock = [(w * s) as f32, (l * s) as f32, (self.pith_offset_mm[0] * s) as f32];
         }
-        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
+        let to_grain =
+            wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
         Some(WoodShade { look, to_grain })
     }
 
@@ -171,7 +185,9 @@ impl Grain {
                 "pores" => self.pores = Some(x.as_f64().ok_or("`grain.pores` must be a number")?),
                 "streaks" => self.streaks = Some(x.as_f64().ok_or("`grain.streaks` must be a number")?),
                 other => {
-                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, contrast, pores, streaks)"));
+                    return Err(format!(
+                        "unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, contrast, pores, streaks)"
+                    ));
                 }
             }
         }
@@ -324,7 +340,19 @@ mod tests {
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
-        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"stock_mm": [1, 0]}), json!({"shift_mm": 1e9}), json!({"pores": 2})] {
+        for bad in [
+            json!({"species": "balsa"}),
+            json!({"axis": [0, 0, 0]}),
+            json!({"scale": 0}),
+            json!({"ring_spacing_mm": -1}),
+            json!({"knots": true}),
+            json!({"pith_offset_mm": [0, 1e9]}),
+            json!({"pith_offset_mm": "far"}),
+            json!({"contrast": 9}),
+            json!({"stock_mm": [1, 0]}),
+            json!({"shift_mm": 1e9}),
+            json!({"pores": 2}),
+        ] {
             assert!(g.clone().apply_json(&bad).is_err(), "{bad}");
         }
         assert!(serde_json::from_value::<Grain>(json!({"species": "walnut-dark", "scale": 1e9})).is_err());

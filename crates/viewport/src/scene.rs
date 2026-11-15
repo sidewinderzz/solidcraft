@@ -46,7 +46,17 @@ pub struct SceneMesh {
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), wood: None, face_woods: Vec::new(), values: None }
+        SceneMesh {
+            mesh,
+            color,
+            face_colors: Vec::new(),
+            opacity: 1.0,
+            closed: true,
+            hatch: Hatch(0),
+            wood: None,
+            face_woods: Vec::new(),
+            values: None,
+        }
     }
 
     /// The wood on triangle face `face`, if any: the face's own, else the body's (unless the

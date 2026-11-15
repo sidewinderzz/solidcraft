@@ -117,8 +117,15 @@ fn matches_library_filter(look: &Look, category: Option<&str>, query: &str, only
 
 /// Built-in looks, used until the engine offers a library (`appearance.library`).
 pub(crate) fn builtin() -> Vec<Look> {
-    let l =
-        |cat: &str, name: &str, c: [u8; 3], o: f64| Look { preset: None, name: name.into(), category: cat.into(), color: c, opacity: o, pbr: None, grain: None };
+    let l = |cat: &str, name: &str, c: [u8; 3], o: f64| Look {
+        preset: None,
+        name: name.into(),
+        category: cat.into(),
+        color: c,
+        opacity: o,
+        pbr: None,
+        grain: None,
+    };
     vec![
         l("Metal", "Aluminum - Satin", [196, 199, 204], 1.0),
         l("Metal", "Steel - Brushed", [160, 164, 170], 1.0),
@@ -363,7 +370,7 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
                         color: parse_color(x.get("color")?)?,
                         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
-        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
+                        grain: x.get("grain").filter(|g| g.is_object()).cloned(),
                     },
                     count(x, "bodies") + count(x, "faces") + count(x, "components"),
                 ))
@@ -425,7 +432,10 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
             apply |= ended(&response, ui);
         }
         // Glued-up stock: the body shows as boards of this size glued together.
-        let stock = grain.get("stock_mm").and_then(Value::as_array).map(|a| [a.first().and_then(Value::as_f64).unwrap_or(150.0), a.get(1).and_then(Value::as_f64).unwrap_or(0.0)]);
+        let stock = grain
+            .get("stock_mm")
+            .and_then(Value::as_array)
+            .map(|a| [a.first().and_then(Value::as_f64).unwrap_or(150.0), a.get(1).and_then(Value::as_f64).unwrap_or(0.0)]);
         let mut glued = stock.is_some();
         if ui_kit::row(ui, app.tr("appearance.grain.glued"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.glued_on"), &mut glued)).changed() {
             if glued {
@@ -488,7 +498,11 @@ fn wood_picture(ctx: &egui::Context, species: &'static str) -> Option<egui::Text
             pixels.extend([(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8, 255]);
         }
     }
-    let texture = ctx.load_texture(format!("wood_swatch:{species}"), egui::ColorImage::from_rgba_unmultiplied([SIDE, SIDE], &pixels), egui::TextureOptions::LINEAR);
+    let texture = ctx.load_texture(
+        format!("wood_swatch:{species}"),
+        egui::ColorImage::from_rgba_unmultiplied([SIDE, SIDE], &pixels),
+        egui::TextureOptions::LINEAR,
+    );
     ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
     Some(texture)
 }

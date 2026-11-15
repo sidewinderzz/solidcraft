@@ -2851,9 +2851,16 @@ fn gpu_tiny_scene_matches_cpu_studio_with_face_appearance() {
             surface: Some(white()),
             transmission: None,
             faces: [7, 9]
-                .map(|face| solidcraft_render::FaceAppearance { face, color: [0; 3], opacity: 1.0, surface: Some(surface), transmission: None, wood: None })
+                .map(|face| solidcraft_render::FaceAppearance {
+                    face,
+                    color: [0; 3],
+                    opacity: 1.0,
+                    surface: Some(surface),
+                    transmission: None,
+                    wood: None,
+                })
                 .to_vec(),
-                wood: None,
+            wood: None,
         }],
         bounds,
     };

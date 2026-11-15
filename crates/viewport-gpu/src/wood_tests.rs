@@ -21,7 +21,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 fn board_shade(species: &str) -> WoodShade {
     // A 600 × 100 × 20 mm board along X.
     let (x, y, z) = (600.0, 100.0, 20.0);
-    let p: Vec<Vec3> = (0..8).map(|i| Vec3::new(if i & 1 == 0 { 0.0 } else { x }, if i & 2 == 0 { 0.0 } else { y }, if i & 4 == 0 { 0.0 } else { z })).collect();
+    let p: Vec<Vec3> =
+        (0..8).map(|i| Vec3::new(if i & 1 == 0 { 0.0 } else { x }, if i & 2 == 0 { 0.0 } else { y }, if i & 4 == 0 { 0.0 } else { z })).collect();
     let t = vec![[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4], [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]];
     let mut look = wood::species_look(species).unwrap();
     look.seed = 0x51_7cc1;
@@ -30,16 +31,29 @@ fn board_shade(species: &str) -> WoodShade {
 
 fn gpu_samples(device: &wgpu::Device, queue: &wgpu::Queue, shade: &WoodShade, points: &[[[f32; 4]; 3]]) -> Vec<[f32; 4]> {
     let source = format!("{WGSL}\n{PROBE}");
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("wood_probe"), source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let module =
+        device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("wood_probe"), source: wgpu::ShaderSource::Wgsl(source.into()) });
     let record: Vec<f32> = shade.texels().iter().flatten().copied().collect();
     let flat: Vec<f32> = points.iter().flatten().flatten().copied().collect();
     let bytes = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
-    let storage = |label, data: &[u8]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: data, usage: wgpu::BufferUsages::STORAGE });
+    let storage = |label, data: &[u8]| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: data, usage: wgpu::BufferUsages::STORAGE })
+    };
     let rec = storage("rec", &bytes(&record));
     let pts = storage("pts", &bytes(&flat));
     let size = (points.len() * 16) as u64;
-    let out = device.create_buffer(&wgpu::BufferDescriptor { label: Some("out"), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
-    let read = device.create_buffer(&wgpu::BufferDescriptor { label: Some("read"), size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let out = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("out"),
+        size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("read"),
+        size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("wood_probe"),
         layout: None,

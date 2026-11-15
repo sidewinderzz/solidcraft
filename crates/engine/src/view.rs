@@ -1065,9 +1065,24 @@ fn build_scene(
         let face_woods = if plain {
             Vec::new()
         } else {
-            s.doc.face_colors(body).into_iter().filter(|(_, l)| l.grain.is_some()).filter_map(|(f, l)| Some((f as u32, s.doc.look_wood(body, &l)?))).collect()
+            s.doc
+                .face_colors(body)
+                .into_iter()
+                .filter(|(_, l)| l.grain.is_some())
+                .filter_map(|(f, l)| Some((f as u32, s.doc.look_wood(body, &l)?)))
+                .collect()
         };
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), wood, face_woods, values: None });
+        sc.meshes.push(SceneMesh {
+            mesh: Arc::clone(&mesh),
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            wood,
+            face_woods,
+            values: None,
+        });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
