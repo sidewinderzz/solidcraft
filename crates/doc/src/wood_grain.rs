@@ -31,6 +31,9 @@ pub struct Grain {
     /// wide glued edge to edge (and, with a length above 0, end to end), each with its own
     /// grain. `None`: one piece.
     pub stock_mm: Option<[f64; 2]>,
+    /// A plywood's ply thickness, mm (`None`: the species'). The plies are fitted to each
+    /// body: an odd number of them fills its thickness.
+    pub ply_mm: Option<f64>,
     /// How strongly the rings show, relative to the species (1: as the species; 0: none).
     pub contrast: f64,
     /// Pore density, 0…1 (`None`: the species').
@@ -52,7 +55,7 @@ impl Grain {
     /// The species' default grain.
     pub fn species(species: &str) -> Option<Grain> {
         wood::species_look(species)?;
-        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], shift_mm: 0.0, stock_mm: None, contrast: 1.0, pores: None, streaks: None })
+        Some(Grain { species: species.strip_prefix("starter.wood.").unwrap_or(species).to_string(), axis: GrainAxis::Long, seed: None, scale: 1.0, ring_spacing_mm: None, figure: 1.0, pith_offset_mm: [0.0, 0.0], shift_mm: 0.0, stock_mm: None, ply_mm: None, contrast: 1.0, pores: None, streaks: None })
     }
 
     /// Check the values (finite, in range, a known species).
@@ -82,6 +85,11 @@ impl Grain {
             && !(w.is_finite() && (5.0..=5000.0).contains(&w) && l.is_finite() && (l == 0.0 || (50.0..=50_000.0).contains(&l)))
         {
             return Err("`grain.stock_mm` must be [board width 5…5000, board length 0 (full length) or 50…50000] in mm".into());
+        }
+        if let Some(p) = self.ply_mm
+            && !(p.is_finite() && (0.2..=50.0).contains(&p))
+        {
+            return Err("`grain.ply_mm` must be 0.2…50 mm".into());
         }
         if !(self.contrast.is_finite() && (0.0..=3.0).contains(&self.contrast)) {
             return Err("`grain.contrast` must be 0…3".into());
@@ -121,12 +129,15 @@ impl Grain {
             GrainAxis::Long => Axis::Long,
             GrainAxis::Fixed(v) => Axis::Fixed(v),
         };
-        if let Some([w, l]) = self.stock_mm {
+        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
+        if look.ply[0] > 0.0 {
+            // Plywood is a sheet, not boards: its plies are fitted to the body's thickness.
+            look.ply = wood::fit_plies(positions, &to_grain, self.ply_mm.unwrap_or(f64::from(look.ply[0])), self.scale);
+        } else if let Some([w, l]) = self.stock_mm {
             // In grain mm: the pattern's scale stretches the grain, not the boards.
             let s = 1.0 / self.scale.clamp(0.01, 100.0);
             look.stock = [(w * s) as f32, (l * s) as f32, (self.pith_offset_mm[0] * s) as f32];
         }
-        let to_grain = wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
         Some(WoodShade { look, to_grain })
     }
 
@@ -167,11 +178,12 @@ impl Grain {
                 "pith_offset_mm" => self.pith_offset_mm = parse_pith(x)?,
                 "shift_mm" => self.shift_mm = x.as_f64().ok_or("`grain.shift_mm` must be a number")?,
                 "stock_mm" => self.stock_mm = parse_stock(x)?,
+                "ply_mm" => self.ply_mm = Some(x.as_f64().ok_or("`grain.ply_mm` must be a number")?),
                 "contrast" => self.contrast = x.as_f64().ok_or("`grain.contrast` must be a number")?,
                 "pores" => self.pores = Some(x.as_f64().ok_or("`grain.pores` must be a number")?),
                 "streaks" => self.streaks = Some(x.as_f64().ok_or("`grain.streaks` must be a number")?),
                 other => {
-                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, contrast, pores, streaks)"));
+                    return Err(format!("unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks)"));
                 }
             }
         }
@@ -260,6 +272,8 @@ struct GrainWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     stock_mm: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    ply_mm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     contrast: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pores: Option<f64>,
@@ -280,6 +294,7 @@ impl TryFrom<GrainWire> for Grain {
             pith_offset_mm: w.pith_offset_mm.unwrap_or([0.0, 0.0]),
             shift_mm: w.shift_mm.unwrap_or(0.0),
             stock_mm: w.stock_mm,
+            ply_mm: w.ply_mm,
             contrast: w.contrast.unwrap_or(1.0),
             pores: w.pores,
             streaks: w.streaks,
@@ -304,6 +319,7 @@ impl From<Grain> for GrainWire {
             pith_offset_mm: (g.pith_offset_mm != [0.0, 0.0]).then_some(g.pith_offset_mm),
             shift_mm: (g.shift_mm != 0.0).then_some(g.shift_mm),
             stock_mm: g.stock_mm,
+            ply_mm: g.ply_mm,
             contrast: (g.contrast != 1.0).then_some(g.contrast),
             pores: g.pores,
             streaks: g.streaks,
@@ -320,13 +336,38 @@ mod tests {
     fn grain_settings_round_trip_and_refuse_bad_values() {
         let mut g = Grain::species("starter.wood.walnut-dark").unwrap();
         assert_eq!(serde_json::to_value(&g).unwrap(), json!({"species": "walnut-dark"}));
-        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "shift_mm": 40.0, "stock_mm": [150.0, 1200.0], "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
+        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "shift_mm": 40.0, "stock_mm": [150.0, 1200.0], "ply_mm": 1.5, "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
-        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"stock_mm": [1, 0]}), json!({"shift_mm": 1e9}), json!({"pores": 2})] {
+        for bad in [json!({"species": "balsa"}), json!({"axis": [0, 0, 0]}), json!({"scale": 0}), json!({"ring_spacing_mm": -1}), json!({"knots": true}), json!({"pith_offset_mm": [0, 1e9]}), json!({"pith_offset_mm": "far"}), json!({"contrast": 9}), json!({"stock_mm": [1, 0]}), json!({"shift_mm": 1e9}), json!({"ply_mm": 0}), json!({"pores": 2})] {
             assert!(g.clone().apply_json(&bad).is_err(), "{bad}");
         }
         assert!(serde_json::from_value::<Grain>(json!({"species": "walnut-dark", "scale": 1e9})).is_err());
+    }
+
+    /// Plywood's plies fill each body's thickness: 13 in an 18 mm sheet, fewer and thicker
+    /// when asked, whatever the pattern's scale.
+    #[test]
+    fn plywood_plies_are_fitted_to_the_body() {
+        use solidcore_record::Vec3;
+        let (x, y, z) = (600.0, 300.0, 18.0);
+        let p: Vec<Vec3> = (0..8)
+            .map(|i| Vec3::new(if i & 1 == 0 { 0.0 } else { x }, if i & 2 == 0 { 0.0 } else { y }, if i & 4 == 0 { 5.0 } else { 5.0 + z }))
+            .collect();
+        let t =
+            vec![[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4], [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]];
+        let mut g = Grain::species("starter.wood.birch-plywood").unwrap();
+        let shade = g.shade("Panel", &p, &t).unwrap();
+        assert_eq!(shade.look.ply[2], 13.0);
+        assert!((shade.look.ply[0] - 18.0 / 13.0).abs() < 1e-4);
+        // The stack starts at the sheet's bottom face.
+        let low = shade.grain_point(Vec3::new(10.0, 10.0, 5.0))[2].min(shade.grain_point(Vec3::new(10.0, 10.0, 23.0))[2]);
+        assert!((shade.look.ply[1] - low).abs() < 1e-3);
+        g.apply_json(&json!({"ply_mm": 3.0, "scale": 2.0, "stock_mm": 100.0})).unwrap();
+        let shade = g.shade("Panel", &p, &t).unwrap();
+        assert_eq!(shade.look.ply[2], 7.0, "a real 18 mm in plies of about 3 mm");
+        assert_eq!(shade.look.stock, [0.0; 3], "a sheet is not glued from boards");
+        assert_eq!(Grain::species("oak-honey").unwrap().shade("Panel", &p, &t).unwrap().look.ply, [0.0; 3]);
     }
 }

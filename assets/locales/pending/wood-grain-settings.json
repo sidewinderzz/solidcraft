@@ -9,6 +9,7 @@
     "appearance.grain.glued_on": "Glued from boards",
     "appearance.grain.stock_width": "Board width (mm)",
     "appearance.grain.stock_length": "Board length (mm, 0: full)",
+    "appearance.grain.ply": "Ply thickness (mm)",
     "appearance.grain.position": "Move grain",
     "appearance.grain.move": "Drag on the part",
     "appearance.grain.centre": "Centre the grain"

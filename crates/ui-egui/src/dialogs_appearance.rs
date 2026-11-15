@@ -424,10 +424,24 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
             }
             apply |= ended(&response, ui);
         }
+        // Plywood is a sheet: its plies' thickness, and no boards to glue up.
+        let plies = species.map_or(0.0, |l| f64::from(l.ply[0]));
+        if plies > 0.0 {
+            let mut v = grain.get("ply_mm").and_then(Value::as_f64).unwrap_or(plies);
+            let response = ui_kit::row(ui, app.tr("appearance.grain.ply"), |ui| ui_kit::slider(ui, &mut v, 0.5..=6.0, Default::default()));
+            if response.changed() {
+                grain.insert("ply_mm".into(), json!(v));
+            }
+            apply |= ended(&response, ui);
+        }
         // Glued-up stock: the body shows as boards of this size glued together.
         let stock = grain.get("stock_mm").and_then(Value::as_array).map(|a| [a.first().and_then(Value::as_f64).unwrap_or(150.0), a.get(1).and_then(Value::as_f64).unwrap_or(0.0)]);
         let mut glued = stock.is_some();
-        if ui_kit::row(ui, app.tr("appearance.grain.glued"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.glued_on"), &mut glued)).changed() {
+        if plies > 0.0 {
+            // A sheet has no boards.
+        } else if ui_kit::row(ui, app.tr("appearance.grain.glued"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.glued_on"), &mut glued))
+            .changed()
+        {
             if glued {
                 grain.insert("stock_mm".into(), json!([150.0, 0.0]));
             } else {
@@ -482,9 +496,14 @@ fn wood_picture(ctx: &egui::Context, species: &'static str) -> Option<egui::Text
     for y in 0..SIDE {
         for x in 0..SIDE {
             // Across the patch the grain runs upward; the cut passes 25 mm from the pith, so
-            // the rings arch.
-            let g = [900.0 - y as f32 * mm, x as f32 * mm + 4.0, 25.0];
-            let c = solidcraft_viewport::wood::sample(&look, g, [0.0, 2.0 * mm, 0.0], [2.0 * mm, 0.0, 0.0]).srgb;
+            // the rings arch. Plywood shows what tells it apart: its edge, 9 plies of it.
+            let (g, fx, fy) = if look.ply[0] > 0.0 {
+                look.ply = [10.0 / 3.0, 0.0, 9.0];
+                ([900.0 + x as f32 * mm, 0.0, 30.0 - (y as f32 + 0.5) * mm], [2.0 * mm, 0.0, 0.0], [0.0, 0.0, 2.0 * mm])
+            } else {
+                ([900.0 - y as f32 * mm, x as f32 * mm + 4.0, 25.0], [0.0, 2.0 * mm, 0.0], [2.0 * mm, 0.0, 0.0])
+            };
+            let c = solidcraft_viewport::wood::sample(&look, g, fx, fy).srgb;
             pixels.extend([(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8, 255]);
         }
     }
