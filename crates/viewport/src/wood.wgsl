@@ -43,22 +43,60 @@ fn wood_step(slot: u32, v: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(dot(wood_texel(slot, 5u).xyz, v), dot(wood_texel(slot, 6u).xyz, v), dot(wood_texel(slot, 7u).xyz, v));
 }
 
-fn wood_sample(slot: u32, g_in: vec3<f32>, fx: vec3<f32>, fy: vec3<f32>) -> vec4<f32> {
+fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -> vec4<f32> {
     let early = wood_texel(slot, 0u);
     let late_c = wood_texel(slot, 1u);
     let streak_c = wood_texel(slot, 2u);
     let k = wood_texel(slot, 3u);
     let s = u32(wood_texel(slot, 4u).x);
     let stock = wood_texel(slot, 8u);
+    let ply = wood_texel(slot, 10u);
     let ring_mm = early.w;
     let contrast = late_c.w;
     let figure_mm = streak_c.w;
-    let across = max(sqrt(fx.y * fx.y + fx.z * fx.z), sqrt(fy.y * fy.y + fy.z * fy.z));
-    let along = max(abs(fx.x), abs(fy.x));
+    var fx = fx_in;
+    var fy = fy_in;
+    var across = max(sqrt(fx.y * fx.y + fx.z * fx.z), sqrt(fy.y * fy.y + fy.z * fy.z));
+    var along = max(abs(fx.x), abs(fy.x));
     var g = g_in;
     var seam = 0.0;
     var tone = 1.0;
-    if (stock.x > 0.0) {
+    var end = 0.0;
+    if (ply.x > 0.0) {
+        let tp = ply.x;
+        let top = max(ply.z - 1.0, 0.0);
+        let zb = g.z - ply.y;
+        let i = clamp(floor(zb / tp), 0.0, top);
+        let ii = i32(i);
+        let zl = zb - (i + 0.5) * tp;
+        let turned = (ii & 1) == 1;
+        var edge = 0.5 * tp - abs(zl);
+        if ((i <= 0.0 && zl < 0.0) || (i >= top && zl > 0.0)) { edge = 1.0e9; }
+        let fz = max(abs(fx.z), abs(fy.z));
+        let line_mm = 0.1 + fz;
+        seam = 0.5 * (1.0 - wood_smooth(0.0, line_mm, edge)) * (0.1 / line_mm);
+        let n = vec3<f32>(fx.y * fy.z - fx.z * fy.y, fx.z * fy.x - fx.x * fy.z, fx.x * fy.y - fx.y * fy.x);
+        let nn = n.x * n.x + n.y * n.y + n.z * n.z;
+        var na = n.x;
+        if (turned) { na = n.y; end = 0.6; }
+        if (nn > 1.0e-20) { end = na * na / nn; }
+        end = mix(0.5, end, 1.0 - wood_smooth(0.5, 1.5, fz / tp));
+        let h1 = wood_hash(ii, 1, 0, s ^ 0x7f4a7c15u);
+        let h2 = wood_hash(ii, 2, 0, s ^ 0x7f4a7c15u);
+        let h3 = wood_hash(ii, 3, 0, s ^ 0x7f4a7c15u);
+        let h4 = wood_hash(ii, 4, 0, s ^ 0x7f4a7c15u);
+        tone = 0.95 + 0.1 * h4;
+        let deep = zl + 2500.0 + 1500.0 * h3;
+        if (turned) {
+            g = vec3<f32>(g.y + 40000.0 * h1, g.x + 400.0 * (h2 - 0.5), deep);
+            fx = vec3<f32>(fx.y, fx.x, fx.z);
+            fy = vec3<f32>(fy.y, fy.x, fy.z);
+            across = max(sqrt(fx.y * fx.y + fx.z * fx.z), sqrt(fy.y * fy.y + fy.z * fy.z));
+            along = max(abs(fx.x), abs(fy.x));
+        } else {
+            g = vec3<f32>(g.x + 40000.0 * h1, g.y + 400.0 * (h2 - 0.5), deep);
+        }
+    } else if (stock.x > 0.0) {
         let wide = stock.x;
         let yb = g.y + stock.z;
         let j = floor(yb / wide + 0.5);
@@ -119,7 +157,7 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx: vec3<f32>, fy: vec3<f32>) -> vec4
     let base = mix(mix(early.xyz, light, zone), late_c.xyz, late);
     let streaked = mix(base, streak_c.xyz, streak);
     let flecked = mix(streaked, light, 0.35 * fleck);
-    let c = clamp(flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam), vec3<f32>(0.0), vec3<f32>(1.0));
+    let c = clamp(flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mix(vec3<f32>(1.0), vec3<f32>(0.80, 0.72, 0.62), end), vec3<f32>(0.0), vec3<f32>(1.0));
     let roughness = clamp(mix(k.z, k.w, late / max(contrast, 1e-3)) + 0.08 * pore, 0.02, 1.0);
     return vec4<f32>(c, roughness);
 }

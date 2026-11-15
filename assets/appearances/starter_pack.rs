@@ -2,6 +2,7 @@
 use crate::appearance_pack::{Category, GlassBoundary, GlassRecipe, OpaqueRecipe, TextureAxis, TextureRecipe, VisualPreset};
 
 const WOOD: &str = "Procedural 3D grain (rings, figure, streaks, pores) in the viewport, model renders and render jobs; exports that carry one colour per body keep this average colour";
+const PLYWOOD: &str = "Procedural 3D grain and plies (face veneers, alternating plies and glue lines on every edge and cut) in the viewport, model renders and render jobs; exports that carry one colour per body keep this average colour";
 const SOLAR: &str = "Uniform opaque preview only; no cell grid, busbars, electricity or efficiency claim";
 const REGOLITH: &str = "Uniform opaque preview only; no granular displacement or measured lunar optical data";
 const OPAQUE: &str = "Illustrative opaque isotropic PBR; no measured alloy, polymer or engineering properties";
@@ -57,6 +58,22 @@ pub const STARTER_PACK: &[VisualPreset] = &[
         Category::Wood,
         look([223, 210, 184], 0.0, 0.84, 1.5),
         WOOD,
+        None,
+    ),
+    VisualPreset::opaque(
+        "starter.wood.birch-plywood",
+        "Wood - Baltic Birch Plywood",
+        Category::Wood,
+        look([226, 204, 160], 0.0, 0.36, 1.5),
+        PLYWOOD,
+        None,
+    ),
+    VisualPreset::opaque(
+        "starter.wood.birch-plywood-raw",
+        "Wood - Baltic Birch Plywood (Raw)",
+        Category::Wood,
+        look([223, 210, 184], 0.0, 0.84, 1.5),
+        PLYWOOD,
         None,
     ),
     VisualPreset::opaque("starter.wood.teak-golden", "Wood - Golden Teak", Category::Wood, look([166, 118, 62], 0.0, 0.36, 1.5), WOOD, None),

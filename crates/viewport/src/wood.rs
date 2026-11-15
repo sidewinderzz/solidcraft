@@ -44,6 +44,10 @@ pub struct WoodLook {
     /// length), then where the pith lies from the body's middle across its width (the boards
     /// are laid out from the body's middle, not from the pith).
     pub stock: [f32; 3],
+    /// Plywood, in grain mm: the thickness of one ply (0: solid wood), where the sheet's bottom
+    /// face lies through the thickness, and how many plies the sheet has. A species names only
+    /// its plies' usual thickness; [`fit_plies`] fits them to a body.
+    pub ply: [f32; 3],
 }
 
 /// A species: a stable id (the starter preset id without `starter.wood.`) and its look.
@@ -70,7 +74,24 @@ const fn species(
     streaks: f32,
     roughness: [f32; 2],
 ) -> Species {
-    Species { id, look: WoodLook { early, late, streak, light, ring_mm, contrast, figure_mm, pores, streaks, roughness, seed: 0, stock: [0.0; 3] } }
+    Species {
+        id,
+        look: WoodLook {
+            early,
+            late,
+            streak,
+            light,
+            ring_mm,
+            contrast,
+            figure_mm,
+            pores,
+            streaks,
+            roughness,
+            seed: 0,
+            stock: [0.0; 3],
+            ply: [0.0; 3],
+        },
+    }
 }
 
 /// A species as raw, unfinished timber: greyer, paler, flatter and matt (what an oil or a
@@ -99,6 +120,12 @@ const fn raw(id: &'static str, finished: &Species) -> Species {
     }
 }
 
+/// A species as plywood: thin plies of it glued in a stack, each turned a quarter turn from the
+/// one below, `ply_mm` thick.
+const fn plywood(id: &'static str, veneer: &Species, ply_mm: f32) -> Species {
+    Species { id, look: WoodLook { ply: [ply_mm, 0.0, 0.0], ..veneer.look } }
+}
+
 const OAK_HONEY: Species =
     species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]);
 const OAK_SMOKED: Species =
@@ -118,6 +145,9 @@ const ASH: Species =
     species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
 const BIRCH: Species =
     species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]);
+// Birch plywood of the all-birch, void-free kind: 1.4 mm plies (13 in an 18 mm sheet).
+const BIRCH_PLY: Species = plywood("birch-plywood", &BIRCH, 1.4);
+const BIRCH_PLY_RAW: Species = plywood("birch-plywood-raw", &raw("birch-cream-raw", &BIRCH), 1.4);
 const TEAK: Species =
     species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]);
 
@@ -138,6 +168,8 @@ pub const SPECIES: &[Species] = &[
     raw("ash-pale-raw", &ASH),
     BIRCH,
     raw("birch-cream-raw", &BIRCH),
+    BIRCH_PLY,
+    BIRCH_PLY_RAW,
     TEAK,
     raw("teak-golden-raw", &TEAK),
 ];
@@ -205,7 +237,7 @@ impl WoodShade {
         WoodShade { look: self.look, to_grain: out }
     }
 
-    /// The shade as the GPU reads it: 9 `vec4`s (see [`WGSL`]).
+    /// The shade as the GPU reads it: 11 `vec4`s (see [`WGSL`]).
     pub fn texels(&self) -> [[f32; 4]; TEXELS] {
         let l = &self.look;
         let [r0, r1, r2] = self.to_grain;
@@ -220,12 +252,15 @@ impl WoodShade {
             r1,
             r2,
             [l.stock[0], l.stock[1], l.stock[2], 0.0],
+            // Kept for the rings' variation, knots and burl.
+            [0.0; 4],
+            [l.ply[0], l.ply[1], l.ply[2], 0.0],
         ]
     }
 }
 
 /// `vec4`s per wood slot on the GPU.
-pub const TEXELS: usize = 9;
+pub const TEXELS: usize = 11;
 
 // Integer hash → [0, 1). Kept bit for bit equal to the WGSL `wood_hash`.
 fn hash(x: i32, y: i32, z: i32, seed: u32) -> f32 {
@@ -265,6 +300,33 @@ fn scaled(g: [f32; 3], along: f32, across: f32) -> [f32; 3] {
     [g[0] * along, g[1] * across, g[2] * across]
 }
 
+// What end grain keeps of a colour: it drinks a finish and goes darker and warmer.
+const END_GRAIN: [f32; 3] = [0.80, 0.72, 0.62];
+
+/// Plywood's plies fitted to a body drawn as `positions` (world, mm) with the grain map
+/// `to_grain`: an odd number of plies about `ply_mm` thick (real mm; the pattern's `scale`
+/// stretches the grain, not the plies) that fill the body's thickness exactly, so both of its
+/// faces are whole face veneers with the grain running the same way. For [`WoodLook::ply`].
+pub fn fit_plies(positions: &[Vec3], to_grain: &[[f32; 4]; 3], ply_mm: f64, scale: f64) -> [f32; 3] {
+    let r = to_grain[2].map(f64::from);
+    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in positions {
+        let z = r[0] * p.x + r[1] * p.y + r[2] * p.z + r[3];
+        low = low.min(z);
+        high = high.max(z);
+    }
+    let scale = scale.clamp(0.01, 100.0);
+    let ply_mm = if ply_mm.is_finite() { ply_mm.clamp(0.05, 1000.0) } else { 1.0 };
+    let thick = high - low;
+    if !(thick.is_finite() && thick > 1e-9) {
+        return [(ply_mm / scale) as f32, 0.0, 1.0];
+    }
+    // The nearest odd count.
+    let want = (thick * scale / ply_mm).clamp(1.0, 99_999.0);
+    let count = 2.0 * ((want - 1.0) / 2.0).round() + 1.0;
+    [(thick / count) as f32, low as f32, count as f32]
+}
+
 /// The wood function, at point `g` in grain space (mm), seen by a pixel whose steps across the
 /// screen are `fx` and `fy` in grain space (zero: a point). Detail finer than the pixel fades
 /// to its average, each kind by the footprint in its own direction: rings by how many of them
@@ -273,15 +335,63 @@ fn scaled(g: [f32; 3], along: f32, across: f32) -> [f32; 3] {
 /// `wood_sample`.
 pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSample {
     let s = l.seed;
+    let (mut fx, mut fy) = (fx, fy);
     // The pixel's width across the grain and its length along it, mm.
-    let across = (fx[1] * fx[1] + fx[2] * fx[2]).sqrt().max((fy[1] * fy[1] + fy[2] * fy[2]).sqrt());
-    let along = fx[0].abs().max(fy[0].abs());
+    let mut across = (fx[1] * fx[1] + fx[2] * fx[2]).sqrt().max((fy[1] * fy[1] + fy[2] * fy[2]).sqrt());
+    let mut along = fx[0].abs().max(fy[0].abs());
     // Glued-up stock: the body is made of boards `stock[0]` wide (and `stock[1]` long, 0: full
     // length), each cut from its own place in a log, with a glue line between them.
     let mut g = g;
     let mut seam = 0.0;
     let mut tone = 1.0;
-    if l.stock[0] > 0.0 {
+    let mut end = 0.0;
+    if l.ply[0] > 0.0 {
+        // Plywood: a stack of plies through the thickness, counted from the sheet's bottom
+        // face. Each is a veneer peeled around its log (the pith far below it, so its face
+        // shows broad, wandering rings), and every second one is turned a quarter turn.
+        let tp = l.ply[0];
+        let top = (l.ply[2] - 1.0).max(0.0);
+        let zb = g[2] - l.ply[1];
+        let i = (zb / tp).floor().clamp(0.0, top);
+        let ii = i as i32;
+        let zl = zb - (i + 0.5) * tp;
+        let turned = ii & 1 == 1;
+        // A glue line between two plies (none on the sheet's two faces).
+        let mut edge = 0.5 * tp - zl.abs();
+        if (i <= 0.0 && zl < 0.0) || (i >= top && zl > 0.0) {
+            edge = 1.0e9;
+        }
+        let fz = fx[2].abs().max(fy[2].abs());
+        let line_mm = 0.1 + fz;
+        seam = 0.5 * (1.0 - smoothstep(0.0, line_mm, edge)) * (0.1 / line_mm);
+        // End grain is darker: how squarely the surface (its normal, from the pixel's two
+        // steps) cuts across this ply's fibres. Without steps, the turned plies are the dark
+        // ones.
+        let n = [fx[1] * fy[2] - fx[2] * fy[1], fx[2] * fy[0] - fx[0] * fy[2], fx[0] * fy[1] - fx[1] * fy[0]];
+        let nn = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+        let na = if turned { n[1] } else { n[0] };
+        end = if turned { 0.6 } else { 0.0 };
+        if nn > 1.0e-20 {
+            end = na * na / nn;
+        }
+        // Plies finer than a pixel fade to their average.
+        end = mixf(0.5, end, 1.0 - smoothstep(0.5, 1.5, fz / tp));
+        let h1 = hash(ii, 1, 0, s ^ 0x7f4a_7c15);
+        let h2 = hash(ii, 2, 0, s ^ 0x7f4a_7c15);
+        let h3 = hash(ii, 3, 0, s ^ 0x7f4a_7c15);
+        let h4 = hash(ii, 4, 0, s ^ 0x7f4a_7c15);
+        tone = 0.95 + 0.1 * h4;
+        let deep = zl + 2500.0 + 1500.0 * h3;
+        if turned {
+            g = [g[1] + 40000.0 * h1, g[0] + 400.0 * (h2 - 0.5), deep];
+            fx = [fx[1], fx[0], fx[2]];
+            fy = [fy[1], fy[0], fy[2]];
+            across = (fx[1] * fx[1] + fx[2] * fx[2]).sqrt().max((fy[1] * fy[1] + fy[2] * fy[2]).sqrt());
+            along = fx[0].abs().max(fy[0].abs());
+        } else {
+            g = [g[0] + 40000.0 * h1, g[1] + 400.0 * (h2 - 0.5), deep];
+        }
+    } else if l.stock[0] > 0.0 {
         let wide = l.stock[0];
         let yb = g[1] + l.stock[2];
         let j = (yb / wide + 0.5).floor();
@@ -364,7 +474,8 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
-        *ck = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam)).clamp(0.0, 1.0);
+        *ck =
+            (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }
     let roughness = (mixf(l.roughness[0], l.roughness[1], late / l.contrast.max(1e-3)) + 0.08 * pore).clamp(0.02, 1.0);
     WoodSample { srgb: c, roughness }
@@ -565,6 +676,9 @@ mod tests {
                 if i % 2 == 0 {
                     l.stock = [80.0, (i % 3) as f32 * 400.0, 12.0];
                 }
+                if l.ply[0] > 0.0 {
+                    l.ply = [1.4, 135.0, (i % 14) as f32];
+                }
                 let (fx, fy) = ([(i % 4) as f32, 0.2, 0.0], [0.0, 0.1, (i % 3) as f32 * 0.4]);
                 let a = sample(&l, g, fx, fy);
                 assert_eq!(a, sample(&l, g, fx, fy));
@@ -609,6 +723,56 @@ mod tests {
         assert_ne!(at(&l, 10.0), at(&plain, 10.0));
     }
 
+    /// Plywood: an odd stack of plies that fills the board, whole face veneers on both faces,
+    /// glue lines between the plies on an edge, and every second ply's end grain darker there.
+    #[test]
+    fn plywood_fits_an_odd_stack_of_plies_and_shows_them_on_its_edges() {
+        let (p, t) = board();
+        let mut look = species_look("starter.wood.birch-plywood").unwrap();
+        look.seed = 3;
+        let to_grain = frame_for_mesh(&p, &t, Frame::default()).unwrap();
+        for (thick, plies) in [(18.0, 13.0), (12.0, 9.0), (6.0, 5.0), (9.0, 7.0), (1.0, 1.0)] {
+            let q: Vec<Vec3> = p.iter().map(|v| Vec3::new(v.x, v.y, v.z / 20.0 * thick)).collect();
+            let m = frame_for_mesh(&q, &t, Frame::default()).unwrap();
+            let fit = fit_plies(&q, &m, 1.4, 1.0);
+            assert_eq!(fit[2], plies, "{thick} mm");
+            assert!((fit[0] * fit[2] - thick as f32).abs() < 1e-3, "{fit:?}");
+        }
+        // The 20 mm board: 15 plies of 1.333 mm.
+        look.ply = fit_plies(&p, &to_grain, 1.4, 1.0);
+        assert_eq!(look.ply[2], 15.0);
+        let shade = WoodShade { look, to_grain };
+        let lum = |s: WoodSample| s.srgb[0] + s.srgb[1] + s.srgb[2];
+        // On the long edge (y = 0, a pixel stepping along x and z): the mean of each ply.
+        let ply = |k: usize| {
+            let z = (k as f64 + 0.5) * 20.0 / 15.0;
+            (0..200)
+                .map(|i| lum(shade.sample_seen(Vec3::new(50.0 + f64::from(i) * 2.3, 0.0, z), Vec3::new(0.05, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.05))))
+                .sum::<f32>()
+                / 200.0
+        };
+        for k in (1..15).step_by(2) {
+            assert!(ply(k) < 0.9 * ply(k - 1) && ply(k) < 0.9 * ply(k + 1), "ply {k}: {} between {} and {}", ply(k), ply(k - 1), ply(k + 1));
+        }
+        // Around the corner, on the end (x = 0), the other plies show their end grain.
+        let end = |k: usize| {
+            let z = (k as f64 + 0.5) * 20.0 / 15.0;
+            (0..200)
+                .map(|i| lum(shade.sample_seen(Vec3::new(0.0, 2.0 + f64::from(i) * 0.47, z), Vec3::new(0.0, 0.05, 0.0), Vec3::new(0.0, 0.0, 0.05))))
+                .sum::<f32>()
+                / 200.0
+        };
+        assert!(end(4) < 0.9 * end(5) && end(6) < 0.9 * end(5), "{} {} {}", end(4), end(5), end(6));
+        // A glue line between two plies is darker than the wood beside it; the faces have none.
+        let at = |z: f64| lum(shade.sample(Vec3::new(300.0, 0.0, z)));
+        let line = 4.0 * 20.0 / 15.0;
+        assert!(at(line) < 0.8 * at(line + 0.4), "{} beside {}", at(line), at(line + 0.4));
+        let face: Vec<f32> = (0..50).map(|i| lum(shade.sample(Vec3::new(100.0 + f64::from(i) * 9.0, 50.0, 20.0)))).collect();
+        let inside: Vec<f32> = (0..50).map(|i| lum(shade.sample(Vec3::new(100.0 + f64::from(i) * 9.0, 50.0, 19.6)))).collect();
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        assert!((mean(&face) - mean(&inside)).abs() < 0.05 * mean(&face), "the top face is the top ply, with no glue line");
+    }
+
     /// Sliding the grain along its length moves the same pattern.
     #[test]
     fn a_shift_slides_the_grain_along_the_board() {
@@ -628,7 +792,8 @@ mod tests {
 
     #[test]
     fn every_starter_wood_has_a_species() {
-        for id in ["oak-honey", "oak-smoked", "walnut-dark", "maple-light", "cherry-warm", "ash-pale", "birch-cream", "teak-golden"] {
+        for id in ["oak-honey", "oak-smoked", "walnut-dark", "maple-light", "cherry-warm", "ash-pale", "birch-cream", "birch-plywood", "teak-golden"]
+        {
             let finished = species_look(&format!("starter.wood.{id}")).unwrap();
             let raw = species_look(&format!("starter.wood.{id}-raw")).unwrap();
             // Raw timber is matt; a finish gives it a sheen.
