@@ -98,6 +98,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ steps.target.outputs.target }}
+      # rust-toolchain.toml pins the Rust version, which can differ from "stable" above; add the
+      # target to the pinned toolchain too, or arm64 builds can't find core/std.
+      - name: Target for the pinned toolchain
+        run: rustup target add "${{ steps.target.outputs.target }}"
       # Downloaded crates only; compiled output is sccache's job.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
