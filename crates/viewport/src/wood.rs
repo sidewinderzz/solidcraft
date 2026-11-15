@@ -360,11 +360,11 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     // Ripple: faint bands across the grain, where the fibres dip and rise.
     let ripple = mixf(1.0, 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab), 1.0 - smoothstep(5.0, 16.0, along));
     let mut c = [0f32; 3];
-    for k in 0..3 {
+    for (k, ck) in c.iter_mut().enumerate() {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
-        c[k] = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam)).clamp(0.0, 1.0);
+        *ck = (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam)).clamp(0.0, 1.0);
     }
     let roughness = (mixf(l.roughness[0], l.roughness[1], late / l.contrast.max(1e-3)) + 0.08 * pore).clamp(0.02, 1.0);
     WoodSample { srgb: c, roughness }
@@ -420,7 +420,7 @@ pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) 
         let (Some(a), Some(b), Some(d)) = (a, b, d) else { continue };
         let w = (b - a).cross(d - a).len() * 0.5;
         area += w;
-        c = c + (a + b + d) * (w / 3.0);
+        c += (a + b + d) * (w / 3.0);
     }
     if !(area > 1e-12) {
         return None;

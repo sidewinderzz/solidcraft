@@ -5552,11 +5552,18 @@ mod tests {
             fragment = false;
             rest = &rest[end + 1..];
         }
+        // Where `body` calls `name`: a whole word, so `sky_lit(` is no call of `lit`.
+        let calls_of = |body: &str, name: &str| -> Vec<usize> {
+            body.match_indices(&format!("{name}("))
+                .map(|(i, _)| i)
+                .filter(|&i| !body[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_'))
+                .collect()
+        };
         // Helpers that take derivatives (directly or through another helper).
         let mut uses: Vec<String> = Vec::new();
         for _ in 0..8 {
             for (n, body, _) in &fns {
-                if !uses.contains(n) && (derivs.iter().any(|d| body.contains(d)) || uses.iter().any(|u| body.contains(&format!("{u}(")))) {
+                if !uses.contains(n) && (derivs.iter().any(|d| body.contains(d)) || uses.iter().any(|u| !calls_of(body, u).is_empty())) {
                     uses.push(n.clone());
                 }
             }
@@ -5564,9 +5571,8 @@ mod tests {
         for (n, body, frag) in &fns {
             let calls: Vec<usize> = derivs
                 .iter()
-                .map(|d| d.to_string())
-                .chain(uses.iter().map(|u| format!("{u}(")))
-                .flat_map(|c| body.match_indices(&c).map(|(i, _)| i).collect::<Vec<_>>())
+                .flat_map(|d| body.match_indices(d).map(|(i, _)| i).collect::<Vec<_>>())
+                .chain(uses.iter().flat_map(|u| calls_of(body, u)))
                 .collect();
             if calls.is_empty() {
                 continue;

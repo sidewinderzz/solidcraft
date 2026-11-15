@@ -674,19 +674,20 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
 /// A whole hovered body, lit over the model from its own plan triangles in a lifted colour.
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
+    let w = wooded(i);
     if (clipped(i.wp)) { discard; }
     // An opaque body keeps its finish under the hover; a faded, see-through or wooden one
     // stays plain (a wooden body keeps its grain).
-    return lit_color(i, 1.0, vec4<f32>(wooded(i).rgb + u.tint.rgb, i.c.a), i.c.a > 0.99 && wood_slot(i.h) == 0u);
+    return lit_color(i, 1.0, vec4<f32>(w.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99 && wood_slot(i.h) == 0u);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
+    let w = wooded(i);
     if (clipped(i.wp)) { discard; }
     // The selection colour stays flat and plain, so it reads the same on every finish; a
     // wooden body keeps its grain under it.
-    let w = wooded(i);
     var base = u.sel.rgb;
     if (wood_slot(i.h) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.4); }
     return lit_color(i, 1.0, vec4<f32>(base, i.c.a), false);
