@@ -328,7 +328,7 @@ fn block(name: &str, colour: [u8; 3], centre: Vec3, half: Vec3) -> ProductMesh {
             mesh.tri_face.extend([face, face]);
         }
     }
-    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity: 1.0, surface: None, transmission: None, faces: Vec::new() }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity: 1.0, surface: None, transmission: None, faces: Vec::new(), wood: None }
 }
 
 /// The product render's output, pinned before W17b S1 reshaped it into prepare, tile and sink
