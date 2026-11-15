@@ -48,6 +48,15 @@ pub struct WoodLook {
     /// face lies through the thickness, and how many plies the sheet has. A species names only
     /// its plies' usual thickness; [`fit_plies`] fits them to a body.
     pub ply: [f32; 3],
+    /// How uneven the growth is, 0…2 (0: even, round, parallel rings; 1: as a real log): wide
+    /// and narrow years, good and lean decades, a log that is not round and tapers, and more
+    /// or less latewood from ring to ring.
+    pub variation: f32,
+    /// How many knots, 0…1 (0: clear timber): branches that grow out from the pith, the rings
+    /// bending around them.
+    pub knots: f32,
+    /// Burl, 0…1 (0: none): the grain swirls in every direction around small eyes.
+    pub burl: f32,
 }
 
 /// A species: a stable id (the starter preset id without `starter.wood.`) and its look.
@@ -90,6 +99,9 @@ const fn species(
             seed: 0,
             stock: [0.0; 3],
             ply: [0.0; 3],
+            variation: 1.0,
+            knots: 0.0,
+            burl: 0.0,
         },
     }
 }
@@ -253,7 +265,7 @@ impl WoodShade {
             r2,
             [l.stock[0], l.stock[1], l.stock[2], 0.0],
             // Kept for the rings' variation, knots and burl.
-            [0.0; 4],
+            [l.variation, l.knots, l.burl, 0.0],
             [l.ply[0], l.ply[1], l.ply[2], 0.0],
         ]
     }
@@ -344,6 +356,8 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let mut g = g;
     let mut seam = 0.0;
     let mut tone = 1.0;
+    // How this piece of timber grew (one number per board): fast or slow.
+    let mut grew = hash(0, 0, 9, s);
     let mut end = 0.0;
     if l.ply[0] > 0.0 {
         // Plywood: a stack of plies through the thickness, counted from the sheet's bottom
@@ -414,8 +428,67 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         let line_mm = 0.15 + across.max(along);
         seam = 0.45 * (1.0 - smoothstep(0.0, line_mm, edge)) * (0.15 / line_mm);
         tone = 0.93 + 0.14 * h4;
+        grew = hash(ji, ii, 5, s ^ 0x2545_f491);
         let side = if h3 < 0.5 { -1.0 } else { 1.0 };
         g = [g[0] + 40000.0 * h3, yl - l.stock[2] - (h1 - 0.5) * wide * 1.2, g[2] - side * (15.0 + 120.0 * h2)];
+    }
+    let vary = l.variation.clamp(0.0, 2.0);
+    let ring_mm = l.ring_mm * mixf(1.0, 0.7 + 0.7 * grew, vary.min(1.0));
+    // Knots: every 300 mm of the log may carry a branch, growing straight out from the pith in
+    // its own direction and widening as it goes. The trunk's rings rise around it like a tent
+    // (`lift`, mm), `knot` is the branch's own wood and `kd` the distance from its middle in
+    // knot radii.
+    let mut lift = 0.0;
+    let mut knot = 0.0;
+    let mut kd = 0.0;
+    if l.knots > 0.0 {
+        let cell = (g[0] / 300.0).floor();
+        let ci = cell as i32;
+        if hash(ci, 1, 11, s ^ 0x7f4a_7c15) < l.knots {
+            let h1 = hash(ci, 2, 11, s ^ 0x7f4a_7c15);
+            let h2 = hash(ci, 3, 11, s ^ 0x7f4a_7c15);
+            let h3 = hash(ci, 4, 11, s ^ 0x7f4a_7c15);
+            let h4 = hash(ci, 5, 11, s ^ 0x7f4a_7c15);
+            // The branch's direction across the grain (a unit vector).
+            let ay = 2.0 * h2 - 1.0;
+            let az = if h3 < 0.5 { -1.0 } else { 1.0 } * (1.0 - ay * ay).max(0.0).sqrt();
+            let out = g[1] * ay + g[2] * az;
+            let side = g[2] * ay - g[1] * az;
+            let u = g[0] - (cell + 0.3 + 0.4 * h1) * 300.0;
+            let rk = (3.0 + 9.0 * h4) * (0.4 + 0.6 * smoothstep(0.0, 120.0, out));
+            let there = smoothstep(0.0, 8.0, out);
+            kd = (u * u + side * side).sqrt() / rk;
+            // The trunk's fibres part around the branch: farther along the grain than across.
+            let far = (u * u * 0.36 + side * side).sqrt() / rk;
+            lift = there * 1.3 * rk * (1.0 - smoothstep(0.3, 4.5, far));
+            knot = there * (1.0 - smoothstep(0.85, 1.05, kd));
+        }
+    }
+    // Burl: the grain swirls the same in every direction (two sizes of swirl), around eyes:
+    // small dormant buds, each with its own tight rings.
+    if l.burl > 0.0 {
+        let b1 = [g[0] / 34.0, g[1] / 34.0, g[2] / 34.0];
+        let b2 = [g[0] / 12.0, g[1] / 12.0, g[2] / 12.0];
+        let sy = 22.0 * (noise(b1, s ^ 0x3243_f6a8) - 0.5) + 7.0 * (noise(b2, s ^ 0x85a3_08d3) - 0.5);
+        let sz = 22.0 * (noise([b1[0] + 19.0, b1[1] + 7.0, b1[2] + 43.0], s ^ 0x1319_8a2e) - 0.5)
+            + 7.0 * (noise([b2[0] + 13.0, b2[1] + 37.0, b2[2] + 5.0], s ^ 0x0370_7344) - 0.5);
+        g = [g[0], g[1] + l.burl * sy, g[2] + l.burl * sz];
+        let e = [(g[0] / 30.0).floor(), (g[1] / 30.0).floor(), (g[2] / 30.0).floor()];
+        let [ex, ey, ez] = e.map(|v| v as i32);
+        if hash(ex, ey, ez, s ^ 0xa409_3822) < 0.35 + 0.6 * l.burl {
+            let c = [
+                0.35 + 0.3 * hash(ex, ey, ez, s ^ 0x299f_31d0),
+                0.35 + 0.3 * hash(ex, ey, ez, s ^ 0x082e_fa98),
+                0.35 + 0.3 * hash(ex, ey, ez, s ^ 0xec4e_6c89),
+            ];
+            let re = 1.2 + 2.2 * hash(ex, ey, ez, s ^ 0x4528_21e6);
+            let d = [g[0] - (e[0] + c[0]) * 30.0, g[1] - (e[1] + c[1]) * 30.0, g[2] - (e[2] + c[2]) * 30.0];
+            let ed = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() / re;
+            let eye = l.burl.min(1.0) * (1.0 - smoothstep(0.0, 3.0, ed));
+            lift += 3.0 * re * eye;
+            knot = knot.max(l.burl.min(1.0) * (1.0 - smoothstep(0.5, 1.0, ed)));
+            kd = if ed < 1.0 { ed } else { kd };
+        }
     }
     // Figure: the rings wander, slowly along the grain and a little faster across it.
     let w = scaled(g, 0.004, 0.02);
@@ -429,16 +502,48 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let z = g[2] + l.figure_mm * (2.0 * dz + 9.0 * ez);
     let r = (y * y + z * z).sqrt();
     // Rings a pixel crosses: its steps, taken outward from the pith.
-    let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * l.ring_mm);
+    let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * ring_mm);
     let rings = 1.0 - smoothstep(0.35, 1.0, fr);
     let thin = 1.0 - smoothstep(0.08, 0.35, fr);
-    // Rings: uneven widths from year to year.
-    let ring = r / l.ring_mm + 0.6 * (noise(scaled([g[0], y, z], 0.01, 0.04), s ^ 0x85eb_ca6b) - 0.5);
-    let t = ring - ring.floor();
+    // A log is not round: it grows faster on some sides than on others (lobes around the pith
+    // that drift along it), and it tapers, so a ring lies closer to the pith farther up.
+    let uy = y / (r + 1.0e-3);
+    let uz = z / (r + 1.0e-3);
+    let lobe = noise([g[0] * 0.0015 + 3.0, 1.3 * uy + 7.0, 1.3 * uz + 13.0], s ^ 0x243f_6a88) - 0.5;
+    let lobe2 = noise([g[0] * 0.004 + 11.0, 3.1 * uy + 5.0, 3.1 * uz + 29.0], s ^ 0xb7e1_5162) - 0.5;
+    let rr = r * (1.0 + vary * (0.22 * lobe + 0.07 * lobe2 * smoothstep(5.0, 60.0, r))) + vary * 0.006 * g[0] - lift;
+    // The years, counted out from the pith: good and lean decades and single odd years (the
+    // rings bunch up and spread out, differently on each side of the log), and small waves.
+    let ring0 = rr / ring_mm;
+    let decade = noise([ring0 * 0.11 + 3.0, g[0] * 0.0008, 2.0 * uy + 2.0 * uz], s ^ 0x13c6_ef37) - 0.5;
+    let year = noise([ring0 * 0.37 + 9.0, g[0] * 0.0015, 3.0 * uy - 3.0 * uz], s ^ 0x5be0_cd19) - 0.5;
+    let ring = ring0
+        + vary * (3.6 * decade + 0.7 * year)
+        + 0.6 * (noise(scaled([g[0], y, z], 0.01, 0.04), s ^ 0x85eb_ca6b) - 0.5)
+        + 0.25 * vary * (noise(scaled([g[0], y, z], 0.03, 0.12), s ^ 0x1b87_3593) - 0.5);
+    // Each year ends where it happens to: its edge lies up to 0.3 of a ring early or late, so
+    // no two neighbours are as wide.
+    let jitter = 0.6 * vary.min(1.5);
+    let n0 = ring.floor();
+    let ni = n0 as i32;
+    let edge = |k: i32| (n0 + k as f32) + jitter * (hash(ni.wrapping_add(k), 0, 7, s ^ 0x6c62_272e) - 0.5);
+    let e0 = edge(0);
+    let e1 = edge(1);
+    let (lo, hi, nr) = if ring < e0 {
+        (edge(-1), e0, ni.wrapping_sub(1))
+    } else if ring >= e1 {
+        (e1, edge(2), ni.wrapping_add(1))
+    } else {
+        (e0, e1, ni)
+    };
+    let t = ((ring - lo) / (hi - lo)).clamp(0.0, 1.0);
+    // And each year has its own share of latewood, and its own depth of colour.
+    let share = mixf(0.55, 0.3 + 0.5 * hash(nr, 1, 7, s ^ 0x6c62_272e), vary.min(1.0));
+    let depth = mixf(1.0, 0.5 + 0.7 * hash(nr, 2, 7, s ^ 0x6c62_272e), vary.min(1.0));
     // Earlywood grades into latewood across the ring, which ends at the next ring: sharply
     // close up, over a pixel's width from afar (a hard edge finer than a pixel would shimmer).
     let wrap = 1.0 - smoothstep(1.0 - fr.clamp(0.02, 0.5), 1.0, t);
-    let late = mixf(0.25, smoothstep(0.55, 0.95, t) * wrap, rings) * l.contrast;
+    let late = mixf(0.25, (smoothstep(share, 0.95, t) * wrap * depth).min(1.0), rings) * l.contrast;
     let q = [g[0], y, z];
     // Colour zones: broad bands of the lighter, warmer tone that run the length of a board.
     // The same point by its ring: along the grain, out from the pith, and around it. Colour
@@ -466,14 +571,17 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         * mixf(1.0, 0.94 + 0.12 * noise(scaled(q, 0.05, 4.0), s ^ 0xbb67_ae85), fine)
         * mixf(1.0, 0.95 + 0.1 * noise(scaled(q, 0.012, 0.45), s ^ 0xa54f_f53a), mid);
     // The crisp dark line that ends each year's growth.
-    let line = smoothstep(0.88, 0.97, t) * wrap * thin * l.contrast;
+    let line = smoothstep(0.88, 0.97, t) * wrap * thin * l.contrast * depth.min(1.0);
     // Ripple: faint bands across the grain, where the fibres dip and rise.
     let ripple = mixf(1.0, 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab), 1.0 - smoothstep(5.0, 16.0, along));
+    let knot_ring = smoothstep(0.5, 1.0, (kd * 4.0 - (kd * 4.0).floor() - 0.5).abs() * 2.0).max(smoothstep(0.7, 1.0, kd));
     let mut c = [0f32; 3];
     for (k, ck) in c.iter_mut().enumerate() {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
+        // A knot is dense, dark wood with rings of its own, darkest at its rim and its heart.
+        let flecked = mixf(flecked, l.late[k] * mixf(l.streak[k], 1.0, 0.45), knot * (0.75 + 0.25 * knot_ring));
         *ck =
             (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }
@@ -509,11 +617,16 @@ pub struct Frame {
     pub pith_mm: [f64; 2],
     /// How far the grain is slid along its length, mm.
     pub shift_mm: f64,
+    /// The grain turned from where the axis puts it, degrees: `[turn, tilt, roll]`. Turn swings
+    /// the grain direction on the body's broad face (about its thickness), tilt leans it out of
+    /// that face (about its width), and roll turns the rings about the grain itself. The pith
+    /// offset and the shift are then measured along the turned directions.
+    pub rotate_deg: [f64; 3],
 }
 
 impl Default for Frame {
     fn default() -> Self {
-        Frame { axis: Axis::Long, scale: 1.0, pith_mm: [0.0, 0.0], shift_mm: 0.0 }
+        Frame { axis: Axis::Long, scale: 1.0, pith_mm: [0.0, 0.0], shift_mm: 0.0, rotate_deg: [0.0; 3] }
     }
 }
 
@@ -567,6 +680,15 @@ pub fn frame_for_mesh(positions: &[Vec3], triangles: &[[u32; 3]], frame: Frame) 
     let thin = thin.normalized().unwrap_or(Vec3::Z);
     let thin = if thin.x * 1e-6 + thin.y * 1e-3 + thin.z < 0.0 { -thin } else { thin };
     let wide = along.cross(thin);
+    // Turned as asked: rolled about the grain, then tilted about the width, then swung about
+    // the thickness (each about the body's own direction, so the three do not fight).
+    let [turn, tilt, roll] = frame.rotate_deg.map(|d| if d.is_finite() { d.to_radians() } else { 0.0 });
+    let spin = |v: Vec3, axis: Vec3, angle: f64| {
+        let (s, c) = angle.sin_cos();
+        v * c + axis.cross(v) * s + axis * (axis.dot(v) * (1.0 - c))
+    };
+    let turned = |v: Vec3| spin(spin(spin(v, along, roll), wide, tilt), thin, turn);
+    let (along, wide, thin) = (turned(along), turned(wide), turned(thin));
     // From the body's start along the grain, so lengthening the far end keeps the pattern.
     let start = positions.iter().map(|p| p.dot(along)).fold(f64::INFINITY, f64::min);
     let pith = c + wide * frame.pith_mm[0] + thin * frame.pith_mm[1];
@@ -787,6 +909,105 @@ mod tests {
             let q = Vec3::new(10.0 + f64::from(i) * 7.0, 20.0 + f64::from(i % 7) * 5.0, 3.0);
             let (x, y) = (a.grain_point(q), b.grain_point(q + along * 40.0 + wide * 5.0 - thin * 3.0));
             assert!((0..3).all(|k| (x[k] - y[k]).abs() < 1e-3), "{x:?} {y:?}");
+        }
+    }
+
+    /// Where the rings end along a line out from the pith, mm (the sharp drop from latewood
+    /// to the next year's earlywood).
+    fn ring_ends(l: &WoodLook, x: f32) -> Vec<f32> {
+        let lum = |r: f32| sample(l, [x, r * 0.6, r * 0.8], [0.0; 3], [0.0; 3]).srgb[0];
+        let mut ends = Vec::new();
+        let mut last = lum(20.0);
+        for i in 1..12000 {
+            let r = 20.0 + i as f32 * 0.02;
+            let v = lum(r);
+            if v > last + 0.04 && ends.last().is_none_or(|e| r - e > 0.3) {
+                ends.push(r);
+            }
+            last = v;
+        }
+        ends
+    }
+
+    /// Real growth is uneven: some years are several times as wide as others. With no
+    /// variation the rings keep an even spacing.
+    #[test]
+    fn ring_widths_vary_from_year_to_year() {
+        let mut l = species_look("ash-pale").unwrap();
+        (l.seed, l.pores, l.streaks, l.figure_mm) = (77, 0.0, 0.0, 0.0);
+        let spread = |l: &WoodLook| {
+            let e = ring_ends(l, 300.0);
+            let w: Vec<f32> = e.windows(2).map(|p| p[1] - p[0]).collect();
+            assert!(w.len() > 30, "{} rings", w.len());
+            let mean = w.iter().sum::<f32>() / w.len() as f32;
+            (w.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / w.len() as f32).sqrt() / mean
+        };
+        let natural = spread(&l);
+        l.variation = 0.0;
+        let even = spread(&l);
+        assert!(natural > 0.3, "uneven years: {natural}");
+        assert!(even < 0.15 && natural > 2.5 * even, "even years: {even} (natural {natural})");
+    }
+
+    /// The same ring is not a circle: followed around the pith, it lies nearer on some sides.
+    #[test]
+    fn a_log_is_not_round() {
+        let mut l = species_look("ash-pale").unwrap();
+        (l.seed, l.pores, l.streaks, l.figure_mm) = (77, 0.0, 0.0, 0.0);
+        let count = |l: &WoodLook, (c, s): (f32, f32)| {
+            let lum = |r: f32| sample(l, [300.0, r * c, r * s], [0.0; 3], [0.0; 3]).srgb[0];
+            (1..10000).filter(|i| lum(20.0 + *i as f32 * 0.02) > lum(20.0 + (*i - 1) as f32 * 0.02) + 0.04).count() as f32
+        };
+        let sides = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (0.6, 0.8), (-0.8, 0.6)];
+        let n: Vec<f32> = sides.iter().map(|d| count(&l, *d)).collect();
+        let (lo, hi) = n.iter().fold((f32::MAX, 0f32), |(a, b), v| (a.min(*v), b.max(*v)));
+        assert!(hi - lo >= 4.0, "rings met out to 220 mm on six sides: {n:?}");
+    }
+
+    /// Knots and burl are off unless asked for, and change the wood when they are.
+    #[test]
+    fn knots_and_burl_are_optional() {
+        let mut l = species_look("oak-honey").unwrap();
+        (l.seed, l.pores, l.streaks) = (3, 0.0, 0.0);
+        // A sleeve 40 mm around the pith, 1.2 m long: every branch of that length passes through it.
+        let picture = |l: &WoodLook| {
+            (0..24000)
+                .map(|i| {
+                    let (sin, cos) = ((i / 400) as f32 * 0.1047).sin_cos();
+                    sample(l, [(i % 400) as f32 * 3.0, 40.0 * cos, 40.0 * sin], [0.0; 3], [0.0; 3]).srgb[0]
+                })
+                .collect::<Vec<f32>>()
+        };
+        let clear = picture(&l);
+        let knotty = picture(&WoodLook { knots: 1.0, ..l });
+        let burl = picture(&WoodLook { burl: 1.0, ..l });
+        let differ = |a: &[f32], b: &[f32]| a.iter().zip(b).filter(|(x, y)| (*x - *y).abs() > 0.02).count();
+        // A knot is local: most of the board stays as it was.
+        assert!((100..12000).contains(&differ(&clear, &knotty)), "{}", differ(&clear, &knotty));
+        // Burl is everywhere.
+        assert!(differ(&clear, &burl) > 12000, "{}", differ(&clear, &burl));
+        let darkest = |v: &[f32]| v.iter().copied().fold(1.0, f32::min);
+        assert!(darkest(&knotty) < darkest(&clear) - 0.05, "a knot is darker than clear wood");
+    }
+
+    /// Turning the grain 90 degrees on a board's face runs it across the board; a roll keeps
+    /// the grain direction and turns the rings.
+    #[test]
+    fn the_grain_turns_tilts_and_rolls() {
+        let (p, t) = board();
+        let row = |m: &[[f32; 4]; 3], k: usize| Vec3::new(f64::from(m[k][0]), f64::from(m[k][1]), f64::from(m[k][2]));
+        let plain = frame_for_mesh(&p, &t, Frame::default()).unwrap();
+        let turn = frame_for_mesh(&p, &t, Frame { rotate_deg: [90.0, 0.0, 0.0], ..Frame::default() }).unwrap();
+        assert!(row(&turn, 0).dot(row(&plain, 1)).abs() > 0.9999, "grain across the width: {turn:?}");
+        assert!(row(&turn, 2).dot(row(&plain, 2)) > 0.9999, "{turn:?}");
+        let tilt = frame_for_mesh(&p, &t, Frame { rotate_deg: [0.0, 30.0, 0.0], ..Frame::default() }).unwrap();
+        assert!((row(&tilt, 0).dot(row(&plain, 2)).abs() - 0.5).abs() < 1e-4 && row(&tilt, 1).dot(row(&plain, 1)) > 0.9999, "{tilt:?}");
+        let roll = frame_for_mesh(&p, &t, Frame { rotate_deg: [0.0, 0.0, 90.0], ..Frame::default() }).unwrap();
+        assert!(row(&roll, 0).dot(row(&plain, 0)) > 0.9999 && row(&roll, 1).dot(row(&plain, 2)).abs() > 0.9999, "{roll:?}");
+        // The pith stays in the body's middle however the grain is turned.
+        for m in [turn, tilt, roll, frame_for_mesh(&p, &t, Frame { rotate_deg: [37.0, -12.0, 140.0], ..Frame::default() }).unwrap()] {
+            let g = WoodShade { look: species_look("walnut-dark").unwrap(), to_grain: m }.grain_point(Vec3::new(300.0, 50.0, 10.0));
+            assert!(g[1].abs() < 1e-3 && g[2].abs() < 1e-3, "{g:?}");
         }
     }
 

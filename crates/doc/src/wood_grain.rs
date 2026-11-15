@@ -40,6 +40,15 @@ pub struct Grain {
     pub pores: Option<f64>,
     /// How much dark streaking shows, 0…1 (`None`: the species').
     pub streaks: Option<f64>,
+    /// The grain turned from where `axis` puts it, degrees: `[turn, tilt, roll]` (swung on the
+    /// broad face, leaned out of it, the rings rolled about the grain).
+    pub rotate_deg: [f64; 3],
+    /// How uneven the growth is, 0…2 (0: even, round rings; 1: as a real log).
+    pub variation: f64,
+    /// How many knots, 0…1 (0: clear timber).
+    pub knots: f64,
+    /// Burl, 0…1 (0: none): swirling grain with eyes.
+    pub burl: f64,
 }
 
 /// Which way the grain runs.
@@ -69,6 +78,10 @@ impl Grain {
             contrast: 1.0,
             pores: None,
             streaks: None,
+            rotate_deg: [0.0; 3],
+            variation: 1.0,
+            knots: 0.0,
+            burl: 0.0,
         })
     }
 
@@ -108,7 +121,13 @@ impl Grain {
         if !(self.contrast.is_finite() && (0.0..=3.0).contains(&self.contrast)) {
             return Err("`grain.contrast` must be 0…3".into());
         }
-        for (name, v) in [("pores", self.pores), ("streaks", self.streaks)] {
+        if !self.rotate_deg.iter().all(|v| v.is_finite() && v.abs() <= 360.0) {
+            return Err("`grain.rotate_deg` must be [turn, tilt, roll], each within ±360 degrees".into());
+        }
+        if !(self.variation.is_finite() && (0.0..=2.0).contains(&self.variation)) {
+            return Err("`grain.variation` must be 0…2".into());
+        }
+        for (name, v) in [("pores", self.pores), ("streaks", self.streaks), ("knots", Some(self.knots)), ("burl", Some(self.burl))] {
             if let Some(v) = v
                 && !(v.is_finite() && (0.0..=1.0).contains(&v))
             {
@@ -139,12 +158,20 @@ impl Grain {
         if let Some(v) = self.streaks {
             look.streaks = v as f32;
         }
+        look.variation = self.variation as f32;
+        look.knots = self.knots as f32;
+        look.burl = self.burl as f32;
+        // A plywood sheet's plies stay flat in it: its grain turns on the face only.
+        let rotate_deg = if look.ply[0] > 0.0 { [self.rotate_deg[0], 0.0, 0.0] } else { self.rotate_deg };
         let axis = match self.axis {
             GrainAxis::Long => Axis::Long,
             GrainAxis::Fixed(v) => Axis::Fixed(v),
         };
-        let to_grain =
-            wood::frame_for_mesh(positions, triangles, Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm })?;
+        let to_grain = wood::frame_for_mesh(
+            positions,
+            triangles,
+            Frame { axis, scale: self.scale, pith_mm: self.pith_offset_mm, shift_mm: self.shift_mm, rotate_deg },
+        )?;
         if look.ply[0] > 0.0 {
             // Plywood is a sheet, not boards: its plies are fitted to the body's thickness.
             look.ply = wood::fit_plies(positions, &to_grain, self.ply_mm.unwrap_or(f64::from(look.ply[0])), self.scale);
@@ -197,9 +224,13 @@ impl Grain {
                 "contrast" => self.contrast = x.as_f64().ok_or("`grain.contrast` must be a number")?,
                 "pores" => self.pores = Some(x.as_f64().ok_or("`grain.pores` must be a number")?),
                 "streaks" => self.streaks = Some(x.as_f64().ok_or("`grain.streaks` must be a number")?),
+                "rotate_deg" => self.rotate_deg = parse_rotate(x)?,
+                "variation" => self.variation = x.as_f64().ok_or("`grain.variation` must be a number")?,
+                "knots" => self.knots = x.as_f64().ok_or("`grain.knots` must be a number")?,
+                "burl" => self.burl = x.as_f64().ok_or("`grain.burl` must be a number")?,
                 other => {
                     return Err(format!(
-                        "unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks)"
+                        "unknown `grain` field `{other}` (species, axis, seed, scale, ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks, rotate_deg, variation, knots, burl)"
                     ));
                 }
             }
@@ -219,6 +250,16 @@ fn parse_pith(v: &Value) -> Result<[f64; 2], String> {
     match v {
         Value::Number(n) => Ok([0.0, n.as_f64().ok_or_else(bad)?]),
         Value::Array(a) if a.len() == 2 => Ok([a[0].as_f64().ok_or_else(bad)?, a[1].as_f64().ok_or_else(bad)?]),
+        _ => Err(bad()),
+    }
+}
+
+/// `rotate_deg`: `[turn, tilt, roll]` in degrees, or one number (the turn).
+fn parse_rotate(v: &Value) -> Result<[f64; 3], String> {
+    let bad = || "`grain.rotate_deg` must be [turn, tilt, roll] in degrees, or one number (the turn)".to_string();
+    match v {
+        Value::Number(n) => Ok([n.as_f64().ok_or_else(bad)?, 0.0, 0.0]),
+        Value::Array(a) if a.len() == 3 => Ok([a[0].as_f64().ok_or_else(bad)?, a[1].as_f64().ok_or_else(bad)?, a[2].as_f64().ok_or_else(bad)?]),
         _ => Err(bad()),
     }
 }
@@ -296,6 +337,14 @@ struct GrainWire {
     pores: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     streaks: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotate_deg: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    variation: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    knots: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    burl: Option<f64>,
 }
 
 impl TryFrom<GrainWire> for Grain {
@@ -315,6 +364,10 @@ impl TryFrom<GrainWire> for Grain {
             contrast: w.contrast.unwrap_or(1.0),
             pores: w.pores,
             streaks: w.streaks,
+            rotate_deg: w.rotate_deg.unwrap_or([0.0; 3]),
+            variation: w.variation.unwrap_or(1.0),
+            knots: w.knots.unwrap_or(0.0),
+            burl: w.burl.unwrap_or(0.0),
         };
         g.validate()?;
         Ok(g)
@@ -340,6 +393,10 @@ impl From<Grain> for GrainWire {
             contrast: (g.contrast != 1.0).then_some(g.contrast),
             pores: g.pores,
             streaks: g.streaks,
+            rotate_deg: (g.rotate_deg != [0.0; 3]).then_some(g.rotate_deg),
+            variation: (g.variation != 1.0).then_some(g.variation),
+            knots: (g.knots != 0.0).then_some(g.knots),
+            burl: (g.burl != 0.0).then_some(g.burl),
         }
     }
 }
@@ -353,7 +410,7 @@ mod tests {
     fn grain_settings_round_trip_and_refuse_bad_values() {
         let mut g = Grain::species("starter.wood.walnut-dark").unwrap();
         assert_eq!(serde_json::to_value(&g).unwrap(), json!({"species": "walnut-dark"}));
-        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "shift_mm": 40.0, "stock_mm": [150.0, 1200.0], "ply_mm": 1.5, "contrast": 1.5, "pores": 0.2, "streaks": 0.9})).unwrap();
+        g.apply_json(&json!({"axis": "X", "seed": 7, "scale": 1.5, "ring_spacing_mm": 5.0, "figure": 0.5, "pith_offset_mm": [10.0, -150.0], "shift_mm": 40.0, "stock_mm": [150.0, 1200.0], "ply_mm": 1.5, "contrast": 1.5, "pores": 0.2, "streaks": 0.9, "rotate_deg": [30.0, -5.0, 90.0], "variation": 1.5, "knots": 0.4, "burl": 0.2})).unwrap();
         let saved = serde_json::to_value(&g).unwrap();
         assert_eq!(serde_json::from_value::<Grain>(saved.clone()).unwrap(), g);
         assert_eq!(saved["axis"], json!([1.0, 0.0, 0.0]));
@@ -363,6 +420,12 @@ mod tests {
             json!({"scale": 0}),
             json!({"ring_spacing_mm": -1}),
             json!({"knots": true}),
+            json!({"knots": 2}),
+            json!({"burl": -1}),
+            json!({"variation": 3}),
+            json!({"rotate_deg": [0, 0]}),
+            json!({"rotate_deg": [0, 0, 1e9]}),
+            json!({"sapwood": 1}),
             json!({"pith_offset_mm": [0, 1e9]}),
             json!({"pith_offset_mm": "far"}),
             json!({"contrast": 9}),

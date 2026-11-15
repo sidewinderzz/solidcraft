@@ -57,7 +57,7 @@ pub struct AppearanceAssignParams {
     #[serde(default)]
     pub pbr: Option<PbrParam>,
     /// Procedural 3D wood grain (the starter woods carry theirs): `{species, axis, seed, scale,
-    /// ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
+    /// ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks, rotate_deg, variation, knots, burl}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
     /// maple-light, cherry-warm, ash-pale, birch-cream, birch-plywood or teak-golden. `axis`: `"long"` (default:
     /// along each body's longest direction), `"X"`, `"Y"`, `"Z"` or `[x, y, z]`. `seed`: 0…16777215
     /// (default: from each body's name). `scale`: 0.05…20 (1: real size). `ring_spacing_mm`:
@@ -66,7 +66,9 @@ pub struct AppearanceAssignParams {
     /// the thickness), ±100000 mm; default `[0, 0]`, rings centred on the board. `shift_mm`: slides the grain along its
     /// length. `stock_mm`: `[board width, board length]` or one number (the width): the body shows as boards
     /// glued edge to edge (length 0: full-length boards), each with its own grain; `null`: one piece. `ply_mm`: 0.2…50, a plywood's ply thickness (default 1.4; an odd number of plies fills each body's thickness). `contrast`: 0…3, how strongly the rings
-    /// show (1: the species'). `pores`, `streaks`: 0…1 (default: the species'). The look's own
+    /// show (1: the species'). `pores`, `streaks`: 0…1 (default: the species'). `rotate_deg`: `[turn, tilt, roll]` in degrees or one number (the turn): the grain swung on the
+    /// body's broad face, leaned out of it, and its rings rolled about the grain (plywood turns only). `variation`: 0…2, how uneven the rings are (0: even and round; default 1).
+    /// `knots`: 0…1 (default 0: clear timber). `burl`: 0…1 (default 0): swirling grain with eyes. The look's own
     /// `color` tints the wood and its `pbr.roughness` is the finish's gloss. `true`: the species' defaults; `null`
     /// removes the grain.
     #[serde(default)]

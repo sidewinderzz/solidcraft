@@ -423,6 +423,9 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
             ("appearance.grain.figure", "figure", 1.0, 0.0..=5.0),
             ("appearance.grain.pores", "pores", species.map_or(0.5, |l| f64::from(l.pores)), 0.0..=1.0),
             ("appearance.grain.streaks", "streaks", species.map_or(0.5, |l| f64::from(l.streaks)), 0.0..=1.0),
+            ("appearance.grain.variation", "variation", 1.0, 0.0..=2.0),
+            ("appearance.grain.knots", "knots", 0.0, 0.0..=1.0),
+            ("appearance.grain.burl", "burl", 0.0, 0.0..=1.0),
         ] {
             let mut v = grain.get(key).and_then(Value::as_f64).unwrap_or(default);
             let response = ui_kit::row(ui, app.tr(label), |ui| ui_kit::slider(ui, &mut v, range, Default::default()));
@@ -467,6 +470,22 @@ fn grain_rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Ap) -> bool {
                 grain.insert("stock_mm".into(), json!([width, length]));
             }
             apply |= ended(&w, ui) || ended(&l, ui);
+        }
+        // Which way the grain runs: swung on the broad face, leaned out of it, the rings rolled.
+        let mut turned = grain
+            .get("rotate_deg")
+            .and_then(Value::as_array)
+            .map_or([0.0; 3], |a| [0, 1, 2].map(|i| a.get(i).and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(0.0)));
+        for (i, label) in ["appearance.grain.turn", "appearance.grain.tilt", "appearance.grain.roll"].into_iter().enumerate() {
+            let response = ui_kit::row(ui, app.tr(label), |ui| ui_kit::slider(ui, &mut turned[i], -180.0..=180.0, Default::default()));
+            if response.changed() {
+                if turned == [0.0; 3] {
+                    grain.remove("rotate_deg");
+                } else {
+                    grain.insert("rotate_deg".into(), json!(turned));
+                }
+            }
+            apply |= ended(&response, ui);
         }
         // Where the grain lies in the body: dragged in the view, or put back to the middle.
         ui_kit::row(ui, app.tr("appearance.grain.position"), |ui| ui_kit::checkbox(ui, app.tr("appearance.grain.move"), &mut k.move_grain));
