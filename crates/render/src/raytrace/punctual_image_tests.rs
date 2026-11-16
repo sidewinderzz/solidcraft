@@ -19,6 +19,7 @@ fn plane(name: &str, x: f64, z: f64, half: f64) -> ProductMesh {
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap()),
         faces: Vec::new(),
+        wood: None,
     }
 }
 

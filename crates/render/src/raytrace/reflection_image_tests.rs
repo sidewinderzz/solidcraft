@@ -159,6 +159,7 @@ fn scene() -> ProductScene {
             opacity: 1.0,
             surface,
             faces: Vec::new(),
+            wood: None,
         }
     }
     let mirror = quad(
@@ -314,6 +315,7 @@ fn shared_spawn_excludes_signed_zero_self_hit_without_skipping_thin_blockers() {
                 opacity: 1.0,
                 surface: None,
                 faces: Vec::new(),
+                wood: None,
             }],
             bounds: Default::default(),
         };

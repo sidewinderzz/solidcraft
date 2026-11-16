@@ -34,6 +34,7 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
                     opacity: look.opacity.clamp(0.0, 1.0),
                     surface: look.opaque_surface().map_err(|e| EngineError::Other(e.to_string()))?,
                     transmission: None,
+                    wood: s.doc.look_wood(body, &look).map(Box::new),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -47,6 +48,7 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
             surface,
             transmission: None,
             faces,
+            wood: s.doc.model_body_wood(body),
         });
     }
     Ok(scene)

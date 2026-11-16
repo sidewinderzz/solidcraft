@@ -68,16 +68,22 @@ impl<'a> PreparedScene<'a> {
         if !front_face {
             normal = -normal;
         }
+        let position = va * a + vb * b + vc * c;
+        // Wood: the colour and roughness of its grain at this point.
+        let surface = match body.wood_at(primitive.face) {
+            Some(wood) => crate::product::wooded_surface(wood, primitive.surface, position),
+            None => primitive.surface,
+        };
         Ok(SharedHit {
             body_index: primitive.body_index,
             body_name: &body.name,
             primitive_index: hit.primitive_index,
             distance_mm: hit.geometry.distance,
-            position: va * a + vb * b + vc * c,
+            position,
             geometric_normal: geometric,
             front_face,
             shading_normal: normal,
-            surface: primitive.surface,
+            surface,
             vertices: primitive.vertices,
             barycentric: hit.geometry.barycentric,
         })
