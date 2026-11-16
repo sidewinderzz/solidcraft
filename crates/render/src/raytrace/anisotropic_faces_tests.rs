@@ -20,6 +20,7 @@ fn body(name: &str, x: f64) -> ProductMesh {
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::new(0.8, 0.8, 0.8), 1.0, 0.5, 1.5).unwrap()),
         faces: Vec::new(),
+        wood: None,
     }
 }
 

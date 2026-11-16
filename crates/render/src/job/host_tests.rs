@@ -454,6 +454,7 @@ fn malformed_geometry_is_rejected_without_stopping_the_host() {
             surface: None,
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let error = host.submit(id(1, 1), 1, scene, request()).err().unwrap();
@@ -817,6 +818,7 @@ fn unqualified_executors_refuse_glass_models_and_caustics_before_acquiring_a_lea
                 .unwrap(),
         ),
         faces: Vec::new(),
+        wood: None,
     });
     let error = host.admit(&scene, &request(), JobOptions::default()).unwrap_err();
     assert!(error.message.contains("advanced Glass models"));
@@ -1431,6 +1433,7 @@ fn failed_begin_releases_captured_scene_and_reservation_before_signalling() {
             surface: None,
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let job = host.submit(id(9032, 1), 62, scene, request()).unwrap();
@@ -1811,6 +1814,7 @@ mod prepared_optical_submission {
                 surface: None,
                 faces: Vec::new(),
                 transmission: None,
+                wood: None,
             }],
         };
         let mut request = ImageRequest { integrator: Integrator::Raytrace, width: 1, height: 1, ..request() };
@@ -2297,6 +2301,7 @@ mod capture_credit {
                 surface: Some(OpaqueSurface::new(solidcore_record::Vec3::new(1., 1., 1.), 0., 0.5, 1.).unwrap()),
                 transmission: None,
                 faces: Vec::new(),
+                wood: None,
             }],
         };
         let mut image = request();
@@ -2588,6 +2593,7 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
                 surface: None,
                 transmission: None,
                 faces: vec![],
+                wood: None,
             }],
         };
         let input = ImageRequest {

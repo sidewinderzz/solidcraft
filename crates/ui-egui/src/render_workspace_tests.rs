@@ -2018,7 +2018,7 @@ fn reordered_face_looks_rebuild_the_block() {
         tri_face: vec![0, 1],
         ..Default::default()
     });
-    let look = |face: u32, color: [u8; 3]| FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None };
+    let look = |face: u32, color: [u8; 3]| FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None, wood: None };
     let mut scene = ProductScene {
         meshes: vec![ProductMesh {
             name: "Part".into(),
@@ -2027,6 +2027,7 @@ fn reordered_face_looks_rebuild_the_block() {
             opacity: 1.0,
             surface: None,
             transmission: None,
+            wood: None,
             faces: vec![look(0, [255, 0, 0]), look(1, [0, 0, 255])],
         }],
         bounds: solidcraft_engine::geom::Aabb3::EMPTY,
@@ -2232,6 +2233,7 @@ fn malformed_shared_mesh_fails_the_instanced_preview() {
         opacity: 1.0,
         surface: None,
         transmission: None,
+        wood: None,
         faces: Vec::new(),
     };
     let scene = ProductScene { meshes: vec![body("Copy A"), body("Copy B")], bounds: solidcraft_engine::geom::Aabb3::EMPTY };
@@ -4926,6 +4928,7 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
         surface: Some(OpaqueSurface::new(Vec3::new(0.4, 0.2, 0.1), 0.0, 0.4, 1.5).unwrap()),
         transmission: None,
         faces: Vec::new(),
+        wood: None,
     };
     let scene = ProductScene { meshes: vec![body], bounds: mesh.bounds() };
     assert!(preview_upload_plan(&scene, 128 * 1024 * 1024).is_err());
@@ -8245,6 +8248,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
             surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds: Aabb3::EMPTY,
     };
