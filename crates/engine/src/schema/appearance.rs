@@ -1,5 +1,6 @@
 //! Contracts and result types for the appearance commands in `cmd/inspect.rs`:
-//! `appearance.assign`, `appearance.library` and `appearance.list`.
+//! `appearance.assign`, `appearance.library` and `appearance.list`, and for the two gestures in
+//! `cmd/render_ui.rs`: `appearance.paint` and `appearance.pick_up`.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -55,6 +56,23 @@ pub struct AppearanceAssignParams {
     /// recipe keeps its own; `null` clears it.
     #[serde(default)]
     pub pbr: Option<PbrParam>,
+    /// Procedural 3D wood grain (the starter woods carry theirs): `{species, axis, seed, scale,
+    /// ring_spacing_mm, figure, pith_offset_mm, shift_mm, stock_mm, ply_mm, contrast, pores, streaks, rotate_deg, variation, knots, burl}`, each optional. `species`: oak-honey, oak-smoked, walnut-dark,
+    /// maple-light, cherry-warm, ash-pale, birch-cream, birch-plywood or teak-golden. `axis`: `"long"` (default:
+    /// along each body's longest direction), `"X"`, `"Y"`, `"Z"` or `[x, y, z]`. `seed`: 0…16777215
+    /// (default: from each body's name). `scale`: 0.05…20 (1: real size). `ring_spacing_mm`:
+    /// 0.2…50. `figure`: 0…5 (how much the rings wander). `pith_offset_mm`: where the log's centre
+    /// lies from the board's middle, `[across width, across thickness]` or one number (across
+    /// the thickness), ±100000 mm; default `[0, 0]`, rings centred on the board. `shift_mm`: slides the grain along its
+    /// length. `stock_mm`: `[board width, board length]` or one number (the width): the body shows as boards
+    /// glued edge to edge (length 0: full-length boards), each with its own grain; `null`: one piece. `ply_mm`: 0.2…50, a plywood's ply thickness (default 1.4; an odd number of plies fills each body's thickness). `contrast`: 0…3, how strongly the rings
+    /// show (1: the species'). `pores`, `streaks`: 0…1 (default: the species'). `rotate_deg`: `[turn, tilt, roll]` in degrees or one number (the turn): the grain swung on the
+    /// body's broad face, leaned out of it, and its rings rolled about the grain (plywood turns only). `variation`: 0…2, how uneven the rings are (0: even and round; default 1).
+    /// `knots`: 0…1 (default 0: clear timber). `burl`: 0…1 (default 0): swirling grain with eyes. The look's own
+    /// `color` tints the wood and its `pbr.roughness` is the finish's gloss. `true`: the species' defaults; `null`
+    /// removes the grain.
+    #[serde(default)]
+    pub grain: Option<Value>,
 }
 
 /// `appearance.assign`'s `faces`: at most 10000 points, each `[x, y, z]` (or `{x, y, z}`) or
@@ -222,11 +240,20 @@ pub struct LookReply {
     /// Its opaque PBR response, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pbr: Option<PbrReply>,
+    /// Its procedural wood grain, when it has one (as `appearance.assign` takes it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<Value>,
 }
 
 impl From<&Look> for LookReply {
     fn from(l: &Look) -> Self {
-        LookReply { name: l.name.clone(), color: l.hex(), opacity: l.opacity, pbr: l.pbr.map(PbrReply::from) }
+        LookReply {
+            name: l.name.clone(),
+            color: l.hex(),
+            opacity: l.opacity,
+            pbr: l.pbr.map(PbrReply::from),
+            grain: l.grain.as_ref().and_then(|g| serde_json::to_value(g).ok()),
+        }
     }
 }
 
@@ -296,6 +323,9 @@ pub struct StarterAppearance {
     pub opacity: f64,
     /// Its opaque PBR response; `null` for a recipe that has none (glass).
     pub pbr: Option<PbrReply>,
+    /// Its procedural wood grain (the woods), as `appearance.assign` takes `grain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain: Option<Value>,
     /// False for a recipe this build can't show (the glass ones need refraction).
     pub available: bool,
     /// What showing it needs: opaque_pbr, refraction, certified_thin_or_closed.
@@ -384,6 +414,156 @@ pub struct BodyLooks {
 pub struct FaceIndexLook {
     pub face: usize,
     pub appearance: LookReply,
+}
+
+/// `appearance.paint` takes a look exactly as `appearance.assign` does — the same five keys, read
+/// by the same parser (`cmd::appearance_look`) — and `done: true` to end the UI's paint tool.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePaintParams {
+    /// A library appearance's name or a starter recipe's name or stable `starter.*` id (see
+    /// `appearance.library`). With `color` too, that colour under this name.
+    #[serde(default)]
+    pub appearance: Option<String>,
+    /// The colour, `"#rrggbb"` or `[r, g, b]` (0–255); with `appearance`, it replaces the
+    /// recipe's colour.
+    #[serde(default)]
+    pub color: Option<ColorParam>,
+    /// A label for the look: needs `color`, not with `appearance`.
+    #[serde(default)]
+    pub name: Option<LookLabel>,
+    /// 0 (clear) to 1 (opaque). Default: 1, or the appearance's own.
+    #[serde(default)]
+    pub opacity: Option<f64>,
+    /// The opaque PBR response (needs `color` or `appearance`, and opacity 1).
+    #[serde(default)]
+    pub pbr: Option<PbrParam>,
+    /// `true` ends the UI's paint tool; no look is read.
+    #[serde(default)]
+    pub done: Option<bool>,
+}
+
+/// What a paint request answers: one of the two objects the handler returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearancePaintResult {
+    /// `true` when `done: true` ended the tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
+    /// The look to paint with, when the call gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<LookReply>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `appearance.pick_up` takes one parameter, `target`, optional.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePickUpParams {
+    /// The body, face or component whose look to read. Left out, the reply asks the UI to
+    /// sample one.
+    #[serde(default)]
+    pub target: Option<ChainTarget>,
+}
+
+/// What a pick-up request answers: one of the two objects the handler returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearancePickUpResult {
+    /// `"pick_up"` when no target was given, which asks the UI to sample a look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<&'static str>,
+    /// The look the target resolves to, when a target was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<LookReply>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An `appearance.chain` target, which is what `appearance.pick_up` takes: `{body}`,
+/// `{body, face}` (a zero-based `model.faces` index) or `{component}` (a name or id, or a
+/// placement's name such as `K:2`). Read as `cmd::appearance_chain::chain` reads it, with its
+/// messages. The handler counts 4096 *bytes* of name; `maxLength` counts characters, so a name
+/// of multi-byte characters is refused later than the schema says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainTarget {
+    Body(String),
+    Face { body: String, face: u64 },
+    Component(String),
+}
+
+/// The chain's name check: text of 1..4096 bytes, as `cmd::appearance_chain::name` reads it.
+fn chain_name(value: &Value) -> Option<&str> {
+    value.as_str().filter(|s| !s.is_empty() && s.len() <= 4096)
+}
+
+impl<'de> Deserialize<'de> for ChainTarget {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        let object = value.as_object().ok_or_else(|| D::Error::custom(whole("give one target object")))?;
+        // The handler reads the name first, so a name it can't use is what it says, whatever
+        // else the object holds.
+        let bad_name = || D::Error::custom(whole("target name must have 1..4096 bytes"));
+        match (object.get("body"), object.get("face"), object.get("component")) {
+            (Some(body), None, None) if object.len() == 1 => Ok(ChainTarget::Body(chain_name(body).ok_or_else(bad_name)?.to_string())),
+            (Some(body), Some(face), None) if object.len() == 2 => {
+                let body = chain_name(body).ok_or_else(bad_name)?.to_string();
+                let face = face.as_u64().ok_or_else(|| D::Error::custom(whole("face must be a zero-based unsigned index")))?;
+                Ok(ChainTarget::Face { body, face })
+            }
+            (None, None, Some(component)) if object.len() == 1 => match component {
+                Value::String(_) => Ok(ChainTarget::Component(chain_name(component).ok_or_else(bad_name)?.to_string())),
+                Value::Number(_) => component
+                    .as_u64()
+                    .map(|id| ChainTarget::Component(id.to_string()))
+                    .ok_or_else(|| D::Error::custom(whole("component must be a name or unsigned id"))),
+                _ => Err(D::Error::custom(whole("component must be a name or unsigned id"))),
+            },
+            _ => Err(D::Error::custom(whole("target must be {body}, {body, face}, or {component}"))),
+        }
+    }
+}
+
+impl JsonSchema for ChainTarget {
+    fn schema_name() -> Cow<'static, str> {
+        "ChainTarget".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let name = json!({"type": "string", "minLength": 1, "maxLength": 4096});
+        json_schema!({
+            "description": "A body, one of its faces, or a component: {body}, {body, face} or {component}.",
+            "anyOf": [
+                {"type": "object", "properties": {"body": name}, "required": ["body"], "additionalProperties": false},
+                {"type": "object", "properties": {"body": name, "face": {"type": "integer", "minimum": 0}},
+                 "required": ["body", "face"], "additionalProperties": false},
+                {"type": "object", "properties": {"component": {"anyOf": [name, {"type": "integer", "minimum": 0}]}},
+                 "required": ["component"], "additionalProperties": false}
+            ]
+        })
+    }
+}
+
+/// `appearance.copy` takes one parameter, the `appearance.chain` target whose look goes into the
+/// session's look clipboard. Unlike `appearance.pick_up`, which asks the UI to sample one, this call
+/// has no form without a target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceCopyParams {
+    /// The body, face or component whose look to copy.
+    pub target: ChainTarget,
+}
+
+/// What a copy request answers: the look that went into the clipboard, which is what
+/// `appearance.paste` then applies. The clipboard is transient session state: nothing is saved with
+/// the design and no dialog opens.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceCopyResult {
+    /// The look that was copied.
+    pub look: LookReply,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]

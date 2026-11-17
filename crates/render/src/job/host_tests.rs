@@ -454,6 +454,7 @@ fn malformed_geometry_is_rejected_without_stopping_the_host() {
             surface: None,
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let error = host.submit(id(1, 1), 1, scene, request()).err().unwrap();
@@ -817,6 +818,7 @@ fn unqualified_executors_refuse_glass_models_and_caustics_before_acquiring_a_lea
                 .unwrap(),
         ),
         faces: Vec::new(),
+        wood: None,
     });
     let error = host.admit(&scene, &request(), JobOptions::default()).unwrap_err();
     assert!(error.message.contains("advanced Glass models"));
@@ -1431,6 +1433,7 @@ fn failed_begin_releases_captured_scene_and_reservation_before_signalling() {
             surface: None,
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     };
     let job = host.submit(id(9032, 1), 62, scene, request()).unwrap();
@@ -1811,6 +1814,7 @@ mod prepared_optical_submission {
                 surface: None,
                 faces: Vec::new(),
                 transmission: None,
+                wood: None,
             }],
         };
         let mut request = ImageRequest { integrator: Integrator::Raytrace, width: 1, height: 1, ..request() };
@@ -2297,6 +2301,7 @@ mod capture_credit {
                 surface: Some(OpaqueSurface::new(solidcore_record::Vec3::new(1., 1., 1.), 0., 0.5, 1.).unwrap()),
                 transmission: None,
                 faces: Vec::new(),
+                wood: None,
             }],
         };
         let mut image = request();
@@ -2588,6 +2593,7 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
                 surface: None,
                 transmission: None,
                 faces: vec![],
+                wood: None,
             }],
         };
         let input = ImageRequest {
@@ -2625,6 +2631,42 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
         drop(job);
         assert_eq!(host.admitted_bytes(), 0);
     }
+}
+
+// The native worker checks `stop` and starts waiting while it holds the queue lock. A stop sent
+// in between must still wake it, else joining the worker waits for good (#14500).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stop_sent_while_the_worker_is_about_to_wait_still_wakes_it() {
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
+    let shared = ImageHost::shared(MEMORY_LIMIT);
+    let (checked, on_checked) = sync_channel(1);
+    let (stopped, on_stopped) = sync_channel(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            // Hold the lock between the check and the wait, as native_worker does.
+            let queue = shared.queue.lock().unwrap();
+            assert!(!shared.stop.load(Ordering::Acquire));
+            checked.send(()).unwrap();
+            // A stop that takes the lock cannot finish here; one that doesn't finishes now.
+            let _ = on_stopped.recv_timeout(Duration::from_millis(500));
+            // One wait, without checking `stop` again, as native_worker's wait.
+            let (_queue, waited) = shared.wake.wait_timeout(queue, Duration::from_secs(10)).unwrap();
+            !waited.timed_out()
+        })
+    };
+    on_checked.recv().unwrap();
+    let stopper = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            shared.stop_worker();
+            let _ = stopped.send(());
+        })
+    };
+    assert!(worker.join().unwrap(), "the worker missed the stop and waited until its timeout");
+    stopper.join().unwrap();
 }
 
 #[cfg(not(target_arch = "wasm32"))]

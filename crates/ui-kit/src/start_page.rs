@@ -4,7 +4,7 @@
 //! returns the entry chosen this frame, which the host runs. Nothing here knows the app.
 //!
 //! Tiles and samples take a host [`Icon`] (a kit icon name, a texture or the host's painter);
-//! menu entries take a kit icon name. Thumbnails are textures the host made.
+//! menu entries do too. Thumbnails are textures the host made.
 
 use std::borrow::Cow;
 
@@ -108,6 +108,8 @@ pub struct Recent<'a, A> {
     pub path: Label<'a>,
     pub when: Label<'a>,
     pub kind: Label<'a>,
+    /// What hovering the row says about the file's signing provenance, when it has any.
+    pub security: Option<Label<'a>>,
     pub thumbnail: Option<(egui::TextureId, egui::Vec2)>,
     /// No picture could be made: a dimmed placeholder rather than a loading one.
     pub thumbnail_failed: bool,
@@ -118,8 +120,7 @@ pub struct Recent<'a, A> {
 
 pub struct MenuEntry<'a, A> {
     pub label: Label<'a>,
-    /// A kit icon name: the menu row is a `crate::MenuItem`, which takes a host `Icon` with #13379.
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub chosen: A,
 }
 
@@ -305,6 +306,7 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
                         workspace: &row.kind,
                         thumbnail: row.thumbnail,
                         thumbnail_failed: row.thumbnail_failed,
+                        security: row.security.as_deref(),
                     },
                 );
                 publish(&row_id, &response);
@@ -432,12 +434,13 @@ mod tests {
                         path: "~/part".into(),
                         when: "Just now".into(),
                         kind: "Surface".into(),
+                        security: None,
                         thumbnail: None,
                         thumbnail_failed: false,
                         chosen: Picked::Recent(i),
                         menu: vec![
-                            MenuEntry { label: "Remove from list".into(), icon: "delete", chosen: Picked::Forget(i) },
-                            MenuEntry { label: "Show in folder".into(), icon: "folder", chosen: Picked::ShowInFolder(i) },
+                            MenuEntry { label: "Remove from list".into(), icon: "delete".into(), chosen: Picked::Forget(i) },
+                            MenuEntry { label: "Show in folder".into(), icon: "folder".into(), chosen: Picked::ShowInFolder(i) },
                         ],
                     })
                     .collect(),

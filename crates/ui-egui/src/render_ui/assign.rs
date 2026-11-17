@@ -378,6 +378,7 @@ pub(crate) fn preview_scene(scene: &mut ProductScene, preview: Option<&Preview>)
         color,
         opacity: preview.look["opacity"].as_f64().unwrap_or(1.0),
         pbr: preview.look.get("pbr").filter(|p| !p.is_null()).map(|p| serde_json::from_value(p.clone())).transpose().map_err(|e| e.to_string())?,
+        grain: None,
     };
     let surface = look.opaque_surface().map_err(|e| e.to_string())?;
     for mesh in &mut scene.meshes {
@@ -389,7 +390,7 @@ pub(crate) fn preview_scene(scene: &mut ProductScene, preview: Option<&Preview>)
         for (_, face) in preview.faces.iter().filter(|(name, _)| name == &mesh.name) {
             let face = u32::try_from(*face).map_err(|_| "invalid preview face")?;
             mesh.faces.retain(|f| f.face != face);
-            mesh.faces.push(FaceAppearance { face, color: look.color, opacity: look.opacity, surface, transmission: None });
+            mesh.faces.push(FaceAppearance { face, color: look.color, opacity: look.opacity, surface, transmission: None, wood: None });
         }
     }
     Ok(())
@@ -494,7 +495,7 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
 }
 
 pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::Rect) {
-    crate::shell::register_panel(app, "render:selection", None, None);
+    crate::shell::register_panel(app, "render:selection", None);
     if super::result_active(app) || app.render_workspace.view.stage != super::Stage::Look {
         return;
     }
@@ -540,7 +541,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
-    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect), None);
+    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect));
     match pill.inner {
         Some(0) => app.start("appearance.chain"),
         Some(1) => app.start("appearance.replace"),

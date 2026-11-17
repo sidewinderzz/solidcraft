@@ -33,6 +33,7 @@ fn scene(normal: Vec3) -> ProductScene {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }],
     }
 }
@@ -168,7 +169,7 @@ fn unsupported_diffuse_rough_hdr_refuses_and_selector_capacities_remain_accounte
     invalid.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.5, 1.0, 1.5).unwrap());
     assert!(ImageTask::new_with_environment(invalid, req.clone(), CancelToken::default(), options.clone(), Some(environment(false, 0.0))).is_err());
     let mut invalid = scene(Vec3::Z);
-    invalid.meshes[0].faces.push(crate::FaceAppearance { transmission: None, face: 0, color: [255; 3], opacity: 1.0, surface: None });
+    invalid.meshes[0].faces.push(crate::FaceAppearance { transmission: None, face: 0, color: [255; 3], opacity: 1.0, surface: None, wood: None });
     assert!(options.validate_environment_reflections(&invalid).is_err());
     let selectors = options.reflections.as_ref().unwrap();
     assert_eq!(
@@ -265,6 +266,7 @@ fn hdr_anisotropic_secondary_hit_yields_before_another_debit_and_observes_cancel
         opacity: 1.0,
         surface: None,
         faces: Vec::new(),
+        wood: None,
     });
     let mut request = anisotropic_request(ReflectionMode::RoughSpecular, false);
     request.camera.set_view(solidcraft_viewport::StandardView::Front);

@@ -20,6 +20,7 @@ fn scene() -> ProductScene {
         opacity: 1.0,
         surface: Some(OpaqueSurface::new(Vec3::new(0.8, 0.8, 0.8), 1.0, 0.4, 1.5).unwrap()),
         faces: Vec::new(),
+        wood: None,
     };
     let object = ProductMesh {
         transmission: None,
@@ -35,6 +36,7 @@ fn scene() -> ProductScene {
         opacity: 1.0,
         surface: None,
         faces: Vec::new(),
+        wood: None,
     };
     let meshes = vec![reflector, object];
     let bounds = meshes.iter().map(|b| b.mesh.bounds()).reduce(|a, b| a.union(&b)).unwrap();

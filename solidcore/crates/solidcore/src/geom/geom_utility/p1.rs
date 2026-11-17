@@ -22,9 +22,9 @@
 //! | [`segment_point_angle_deg_to_perp`]   | `smgu_SegmentPointAngleDegToPerp`                |
 //! | [`circle_center_from_3_points`]       | `smgu_CircleCenterFrom3Points`                   |
 //! | [`circle_from_3_points`], [`Circle3Points`] | `smgu_CircleFrom3Points`                   |
-//! | [`circle_find_silhouette_points`], [`circle_find_silhouette_points_opt_in`], [`circle_find_silhouette_points_with_kernel`] | `smgu_CircleFindSilhouettePoints` |
+//! | [`circle_find_silhouette_points`] | `smgu_CircleFindSilhouettePoints` |
 //! | [`cones_are_disjoint_perpen`]         | `smgu_ConesAreDisjointPerpen`                    |
-//! | [`line_coplanar_circle_intersect`]    | `smgu_LineCoPlanarCircleIntersect`               |
+//! | [`line_coplanar_circle_intersect`], [`line_coplanar_circle_intersect_distinct`] | `smgu_LineCoPlanarCircleIntersect` |
 //! | [`circle_coplanar_circle_intersect`], [`CircleCircle`] | `smgu_CircleCoPlanarCircleIntersect` |
 //! | [`line_intersect_sphere`], [`LineSphere`] | `smgu_LineIntersectSphere`                   |
 //! | [`intersect_three_planes`]            | `smgu_IntersectThreePlanes`                      |
@@ -57,10 +57,10 @@
 //! Deviations:
 //! - Out-params and `SmStatus` become return values. `SM_ERR_INVALID_INPUT` (also from
 //!   `ZERO_VEC_ER` and a failed `Unitize`) is [`SolidError::InvalidInput`]; `SM_ERR` is
-//!   [`SolidError::Upstream`] with code 1001, `SM_ERR_WARNING` code 1023. Where upstream
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001, `SM_ERR_WARNING` code 1023. Where upstream
 //!   returns `FALSE` as a status (`smgu_CircleCenterFrom3Points` for coincident
 //!   points; `FALSE` is not a valid `SmStatus` and is not `SM_SUCCESS`) the port returns
-//!   [`SolidError::Upstream`] with code 0.
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 0.
 //! - Upstream fixed-size output arrays plus counts (`ULONG&` + `double[2]`, ...) become
 //!   `Vec`s, `Option`s or enums holding exactly the values upstream sets.
 //! - Statuses upstream ignores (`SE(...)` is a no-op in the release build, or the call
@@ -79,13 +79,11 @@
 //!   derivatives upstream writes.
 //! - `smgu_AddSorted` takes `Vec`s for `SmTArray`s; `sm_AddPoint`'s `ULONG&` count and
 //!   `SmPoint3d[2]` array are a `Vec` of at most two points.
-//! - [`circle_find_silhouette_points_opt_in`] (and
-//!   [`circle_find_silhouette_points_with_kernel`], reading
-//!   [`crate::kernel::UpstreamFixes::circle_silhouette_perspective_center`]) adds an
-//!   opt-in perspective fix (`WR-11`) that rotates `proj_eye_point - circle_center` as a
-//!   vector about `circle_normal` and adds `circle_center`, returning `None` when
-//!   `circle_normal` is degenerate; [`circle_find_silhouette_points`] keeps pinned C++
-//!   parity.
+//! - [`circle_find_silhouette_points`] in perspective (`WR-11`) rotates
+//!   `proj_eye_point - circle_center` as a vector about `circle_normal` and adds
+//!   `circle_center`, returning `None` when `circle_normal` is degenerate; upstream
+//!   negates `to_eye`, rotates a placement at `circle_center` about the global origin
+//!   and scales by `circle_radius` without adding `circle_center`.
 //! - [`best_fit_line_to_points`] takes the largest-eigenvalue eigenvector of a clone of
 //!   the symmetric scatter matrix `M` (preserving [`BestFitLine::m`]), the least-squares
 //!   line direction. Pinned v1.0.1 takes the largest eigenvector of `C = del I - M` built
@@ -93,7 +91,8 @@
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
-use crate::error::{Result, SolidError, SM_ERR_WARNING};
+use crate::error::geom::GeomFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
@@ -101,7 +100,6 @@ use crate::geom::polynomial::{solve_quadratic, Roots};
 use crate::geom::tol::{are_same_to_tol, is_zero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
-use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
@@ -136,7 +134,10 @@ pub fn add_point(points: &mut Vec<Point3>, tol: f64, pnt: Point3) -> Result<()> 
         }
     }
     if points.len() > 1 {
-        return Err(SolidError::sm_err("geom::geom_utility::p1::add_point"));
+        return Err(SolidError::geom_failed(
+            "geom::geom_utility::p1::add_point",
+            "the point set is not empty",
+        ));
     }
     points.push(pnt);
     Ok(())
@@ -353,13 +354,13 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "a line has no direction"));
     }
 
     // error - parallel or coincident lines
     let cross = line_vec1.cross(line_vec2);
     if cross.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the lines are parallel"));
     }
 
     // get minimum distance vector direction
@@ -370,9 +371,9 @@ pub fn line_line_closest_point(
     let plane_v2 = cross.cross(line_vec2).unitize()?;
 
     let t1 = line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2)
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
     let t2 = line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1)
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
     Ok((t1, t2))
 }
 
@@ -396,7 +397,10 @@ pub fn line_plane_intersect(
     let denom = line_vec.dot(plane_norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::sm_err(OP)); // Parallel case
+        return Err(SolidError::geom_failed(
+            OP,
+            "the line is parallel to the plane",
+        )); // Parallel case
     }
 
     Ok(-(plane_eq_d + line_pnt.dot(plane_norm)) / denom)
@@ -430,7 +434,10 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::sm_err(OP)); // Parallel case
+        return Err(SolidError::geom_failed(
+            OP,
+            "the line is parallel to the plane",
+        )); // Parallel case
     }
 
     // Cramer's rule:
@@ -517,18 +524,14 @@ pub fn segment_point_angle_deg_to_perp(
 
 /// Center of the 2D circle through three points (`smgu_CircleCenterFrom3Points`).
 ///
-/// Errors: [`SolidError::Upstream`] with code 0 (upstream returns `FALSE`) when two
+/// Errors: [`GeomFailure`](crate::error::geom::GeomFailure) with code 0 (upstream returns `FALSE`) when two
 /// points are within `SM_EFF_ZERO_SQRT * (1 + |A| + |C|)` of each other; `SM_ERR`
 /// (1001) when the points are (nearly) collinear.
 pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Point2> {
     const OP: &str = "geom::geom_utility::p1::circle_center_from_3_points";
     let tol = EFF_ZERO_SQRT * (1.0 + a.max_dimension() + c.max_dimension());
     let tol2 = tol * tol;
-    let not_ok = || SolidError::Upstream {
-        operation: OP,
-        code: 0,
-        entity: None,
-    };
+    let not_ok = || SolidError::geom(OP, GeomFailure::CoincidentPoints);
     // Do some checks for coincident points and colinear points
     if a.distance_squared(b) < tol2 || b.distance_squared(c) < tol2 || a.distance_squared(c) < tol2
     {
@@ -539,7 +542,7 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     // Upstream calls the 3d smgu_LinePointDistance (points converted with z = 0).
     let (dist_to_line, _) = line_point_distance(Vec3::from(a), vec, Vec3::from(b));
     if dist_to_line < 2.0 * EFF_ZERO * a.distance_squared(c) {
-        return Err(SolidError::sm_err(OP)); // Radius would be bigger than 1 / SM_EFF_ZERO.
+        return Err(SolidError::geom_failed(OP, "the points are collinear")); // Radius would be bigger than 1 / SM_EFF_ZERO.
     }
 
     // Set up the 2x2 as described.
@@ -556,7 +559,7 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     let numer1 = a00 * b1 - a10 * b0;
 
     if determ.abs() < numer0.abs() * EFF_ZERO || determ.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the points are collinear"));
     }
 
     Ok(Point2::new(numer0 / determ, numer1 / determ))
@@ -593,7 +596,10 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(
+            OP,
+            "the dimension is neither 2 nor 3",
+        ));
     }
 
     let mut sp = start;
@@ -625,11 +631,7 @@ pub fn circle_from_3_points(
     // solve for Center Point
     let sol = a.solve_linear_system(&b)?;
     if sol.near_singular {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR_WARNING,
-            entity: None,
-        });
+        return Err(SolidError::geom(OP, GeomFailure::NearlySingular));
     }
     let [x0, x1, x2] =
         <[f64; 3]>::try_from(sol.x.as_slice()).map_err(|_| invalid(OP, "linear solution size"))?;
@@ -666,11 +668,12 @@ pub fn circle_from_3_points(
 /// along a view direction, or `None` when there are none
 /// (`smgu_CircleFindSilhouettePoints`).
 ///
-/// In the perspective case pinned upstream negates `to_eye`, rotates a placement at
-/// `circle_center` about the global origin and scales by `circle_radius` without adding
-/// `circle_center`; this default entry point preserves that behaviour (see
-/// [`circle_find_silhouette_points_opt_in`] and
-/// [`circle_find_silhouette_points_with_kernel`] for `WR-11`).
+/// In perspective, projects `eye_point_or_vector` onto the circle's plane, rotates the
+/// unit direction `proj_eye_point - circle_center` as a pure vector by
+/// `±acos(circle_radius / length)` about `circle_normal` and returns
+/// `circle_center + dir * circle_radius` (or `None` when `circle_normal` is degenerate,
+/// `circle_radius` is negative or non-finite, or the projected eye lies inside
+/// `circle_radius + SM_EFF_ZERO`), `WR-11`.
 pub fn circle_find_silhouette_points(
     circle_center: Point3,
     circle_normal: Vec3,
@@ -678,106 +681,35 @@ pub fn circle_find_silhouette_points(
     perspective: bool,
     eye_point_or_vector: Vec3,
 ) -> Result<Option<(Point3, Point3)>> {
-    circle_find_silhouette_points_opt_in(
-        circle_center,
-        circle_normal,
-        circle_radius,
-        perspective,
-        eye_point_or_vector,
-        false,
-    )
-}
-
-/// [`circle_find_silhouette_points`] forwarding
-/// [`Kernel::fixes`]'s `circle_silhouette_perspective_center` (`WR-11`).
-pub fn circle_find_silhouette_points_with_kernel(
-    k: &Kernel,
-    circle_center: Point3,
-    circle_normal: Vec3,
-    circle_radius: f64,
-    perspective: bool,
-    eye_point_or_vector: Vec3,
-) -> Result<Option<(Point3, Point3)>> {
-    circle_find_silhouette_points_opt_in(
-        circle_center,
-        circle_normal,
-        circle_radius,
-        perspective,
-        eye_point_or_vector,
-        k.fixes.circle_silhouette_perspective_center,
-    )
-}
-
-/// [`circle_find_silhouette_points`] with an explicit opt-in (`fix_perspective`) for
-/// `WR-11`.
-///
-/// When `perspective && fix_perspective`, projects `eye_point_or_vector` onto the
-/// circle's plane, rotates the unit direction `proj_eye_point - circle_center` as a pure
-/// vector by `±acos(circle_radius / length)` about `circle_normal` and returns
-/// `circle_center + dir * circle_radius` (or `None` when `circle_normal` is degenerate,
-/// `circle_radius` is negative or non-finite, or the projected eye lies inside
-/// `circle_radius + SM_EFF_ZERO`). When `!fix_perspective`, matches pinned C++ parity.
-pub fn circle_find_silhouette_points_opt_in(
-    circle_center: Point3,
-    circle_normal: Vec3,
-    circle_radius: f64,
-    perspective: bool,
-    eye_point_or_vector: Vec3,
-    fix_perspective: bool,
-) -> Result<Option<(Point3, Point3)>> {
     if perspective {
-        if fix_perspective {
-            let norm_sq = circle_normal.length_squared();
-            if !norm_sq.is_finite() || norm_sq < EFF_ZERO_SQ {
-                return Ok(None);
-            }
-            if !circle_radius.is_finite() || circle_radius < 0.0 {
-                return Ok(None);
-            }
-            let proj_eye_point =
-                point_project_to_plane(eye_point_or_vector, circle_center, circle_normal);
-            let toward_eye = proj_eye_point - circle_center;
-            let length = toward_eye.length();
-            if !length.is_finite() || length < circle_radius + EFF_ZERO {
-                return Ok(None);
-            }
-            let toward_eye = toward_eye.unitize_or_z();
-
-            let angle_rad = sm_acos(circle_radius / length);
-            let mut a2p = Axis2Placement::IDENTITY;
-            a2p.rotate_about_axis(angle_rad, circle_normal);
-            let to_p1 = a2p.transform_vector(toward_eye);
-            a2p = Axis2Placement::IDENTITY;
-            a2p.rotate_about_axis(-angle_rad, circle_normal);
-            let to_p2 = a2p.transform_vector(toward_eye);
-
-            return Ok(Some((
-                circle_center + to_p1 * circle_radius,
-                circle_center + to_p2 * circle_radius,
-            )));
+        let norm_sq = circle_normal.length_squared();
+        if !norm_sq.is_finite() || norm_sq < EFF_ZERO_SQ {
+            return Ok(None);
         }
-
+        if !circle_radius.is_finite() || circle_radius < 0.0 {
+            return Ok(None);
+        }
         let proj_eye_point =
             point_project_to_plane(eye_point_or_vector, circle_center, circle_normal);
-        let to_eye = circle_center - proj_eye_point;
-        let length = to_eye.length();
-        // If the point is inside of the radius than no silhouette
-        // is possible.
-        if length < circle_radius + EFF_ZERO {
-            return Ok(None); // No answer
+        let toward_eye = proj_eye_point - circle_center;
+        let length = toward_eye.length();
+        if !length.is_finite() || length < circle_radius + EFF_ZERO {
+            return Ok(None);
         }
-        let to_eye = to_eye.unitize_or_z();
+        let toward_eye = toward_eye.unitize_or_z();
 
         let angle_rad = sm_acos(circle_radius / length);
-        let mut a2p = Axis2Placement::default();
-        a2p.set_canonical(circle_center, Vec3::X, Vec3::Y)?;
+        let mut a2p = Axis2Placement::IDENTITY;
         a2p.rotate_about_axis(angle_rad, circle_normal);
-        let to_p1 = a2p.transform_point(to_eye);
-        a2p.set_canonical(circle_center, Vec3::X, Vec3::Y)?;
+        let to_p1 = a2p.transform_vector(toward_eye);
+        a2p = Axis2Placement::IDENTITY;
         a2p.rotate_about_axis(-angle_rad, circle_normal);
-        let to_p2 = a2p.transform_point(to_eye);
+        let to_p2 = a2p.transform_vector(toward_eye);
 
-        return Ok(Some((to_p1 * circle_radius, to_p2 * circle_radius)));
+        return Ok(Some((
+            circle_center + to_p1 * circle_radius,
+            circle_center + to_p2 * circle_radius,
+        )));
     }
 
     // Handle parallel projection.
@@ -824,6 +756,43 @@ pub fn line_coplanar_circle_intersect(
     circle_radius: f64,
     tolerance: f64,
 ) -> Result<Vec<f64>> {
+    line_coplanar_circle_intersect_distinct(
+        line_pnt,
+        line_vec,
+        circle_center,
+        circle_normal,
+        circle_radius,
+        tolerance,
+        tolerance,
+    )
+}
+
+/// [`line_coplanar_circle_intersect`] with the near-miss band and the point identity
+/// tolerance apart: a line passing within `tolerance` of the circle is still found
+/// (none beyond it), but its two crossings are merged into one tangent point only
+/// when that point (the chord's midpoint) lies within `point_tolerance` of the circle.
+/// A line tangent to the circle up to rounding stays one point however long its
+/// numerical chord.
+///
+/// Not upstream: `smgu_LineCoPlanarCircleIntersect` merges the two crossings whenever
+/// they are closer than its single tolerance, and the circle intersectors call it
+/// with ten times their intersection tolerance as a candidate band. Two crossings up
+/// to ten intersection tolerances apart then became one point in the middle of the
+/// chord, off the circle, so neither crossing was found (a box edge cutting a small
+/// sphere's circle a little inside its tangent line, `boolean_api`
+/// `sphere_box_edge_cutting_a_shallow_cap`).
+///
+/// # Errors
+/// As [`line_coplanar_circle_intersect`].
+pub fn line_coplanar_circle_intersect_distinct(
+    line_pnt: Point3,
+    line_vec: Vec3,
+    circle_center: Point3,
+    circle_normal: Vec3,
+    circle_radius: f64,
+    tolerance: f64,
+    point_tolerance: f64,
+) -> Result<Vec<f64>> {
     // project line to plane
     let line_pnt = point_project_to_plane(line_pnt, circle_center, circle_normal);
     let mut line_vec = vector_project_to_plane(line_vec, circle_normal);
@@ -831,8 +800,9 @@ pub fn line_coplanar_circle_intersect(
     // Unitize the line vector.
     let scale = line_vec.length();
     if scale < EFF_ZERO * circle_radius {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom_failed(
             "geom::geom_utility::p1::line_coplanar_circle_intersect",
+            "the line has no direction",
         ));
     }
     line_vec /= scale;
@@ -865,8 +835,10 @@ pub fn line_coplanar_circle_intersect(
     }
 
     // Next test: if the resulting intersection points will be within
-    // tolerance of each other, then it's definitely one intersection.
-    if dist_to_move * 2.0 <= tolerance {
+    // tolerance of each other, then it's definitely one intersection. Not upstream:
+    // only when their midpoint, the tangent point, also lies on the circle within
+    // the point tolerance (identical to upstream when both tolerances are equal).
+    if dist_to_move * 2.0 <= tolerance && circle_radius - dist_to_ctr <= point_tolerance {
         return Ok(vec![t / scale]);
     }
 
@@ -1051,7 +1023,7 @@ pub fn line_intersect_sphere(
     // compute 1/2 distance between the point solutions
     let disc = sphere_radius * sphere_radius - b * b;
     if disc < EFF_ZERO {
-        return Err(SolidError::sm_err(OP)); // can't really happen
+        return Err(SolidError::geom_failed(OP, "the line misses the sphere")); // can't really happen
     }
     let d = sm_sqrt(disc);
 
@@ -1129,8 +1101,9 @@ pub fn plane_point_distance(
     test_point: Point3,
 ) -> Result<f64> {
     if plane_norm.length_squared() - 1.0 > EFF_ZERO {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom_failed(
             "geom::geom_utility::p1::plane_point_distance",
+            "the plane normal is not a unit vector",
         ));
     }
 
@@ -1295,7 +1268,7 @@ pub fn vec_lin_comb_two_vectors(basis1: Vec3, basis2: Vec3, vector: Vec3) -> Res
 
     // `det == 0.0` in case dNumer0 or dNumer1 is 0 exactly.
     if det == 0.0 || det.abs() < numer0.abs() * EFF_ZERO || det.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the system is singular"));
     }
 
     Ok(Point2::new(numer0 / det, numer1 / det))
@@ -1528,7 +1501,10 @@ pub fn inverse_3x3(a0: &[f64; 3], a1: &[f64; 3], a2: &[f64; 3]) -> Result<[[f64;
     let det = vec_triple_product(a0, a1, a2);
 
     if is_zero(det) {
-        return Err(SolidError::sm_err("geom::geom_utility::p1::inverse_3x3"));
+        return Err(SolidError::geom_failed(
+            "geom::geom_utility::p1::inverse_3x3",
+            "the matrix is singular",
+        ));
     }
 
     let [a00, a01, a02] = *a0;
@@ -1846,7 +1822,7 @@ mod tests {
         ));
         assert!(matches!(
             line_plane_intersect(Vec3::ZERO, Vec3::X, Vec3::ZERO, Vec3::Z),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
         let (t, u, w) =
             line_plane_intersect_uv(v(1., 2., 5.), -Vec3::Z, Vec3::ZERO, Vec3::X, Vec3::Y).unwrap();
@@ -1876,7 +1852,7 @@ mod tests {
                 Point2::new(1., 0.),
                 Point2::new(2., 0.)
             ),
-            Err(SolidError::Upstream { code: 0, .. })
+            Err(e) if e.upstream_status() == Some(0)
         ));
         let c =
             circle_from_3_points(v(1., 0., 0.), v(0., 1., 0.), v(-1., 0., 0.), 3, false).unwrap();
@@ -1904,6 +1880,57 @@ mod tests {
             circle_coplanar_circle_intersect(Vec3::Z, Vec3::ZERO, 1.0, v(1., 0., 0.), 1.0, 1e-6)
                 .unwrap();
         assert_eq!(r.count(), 2);
+    }
+
+    /// A line 1.2e-5 inside a circle of radius 3e-4 crosses it twice, 1.66e-4 apart.
+    /// With a near-miss band of 2e-4 (ten intersection tolerances, as the circle
+    /// intersectors pass) the upstream merge made that one point mid-chord, 1.2e-5 off the
+    /// circle; merged only when the midpoint is on the circle within the intersection
+    /// tolerance 5e-6, both crossings stay.
+    #[test]
+    fn crossings_farther_apart_than_the_point_tolerance_stay_two() {
+        let (r, d) = (3e-4, 3e-4 - 1.2e-5);
+        let line = v(-1e-3, d, 0.0);
+        let merged =
+            line_coplanar_circle_intersect(line, Vec3::X, Vec3::ZERO, Vec3::Z, r, 2e-4).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert!((merged[0] - 1e-3).abs() < 1e-15);
+        let hits = line_coplanar_circle_intersect_distinct(
+            line,
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::Z,
+            r,
+            2e-4,
+            5e-6,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        for t in hits {
+            let p = line + t * Vec3::X;
+            assert!((p.length() - r).abs() < 1e-15, "{t}");
+        }
+    }
+
+    /// A line tangent to a circle of radius 3 up to rounding (1e-12 inside) has a
+    /// numerical chord of 4.9e-6, more than a point tolerance of 1e-6, but its
+    /// midpoint is on the circle: one tangent point, as upstream gives.
+    #[test]
+    fn line_tangent_up_to_rounding_stays_one_point() {
+        let r = 3.0;
+        let line = v(-10.0, r - 1e-12, 0.0);
+        let hits = line_coplanar_circle_intersect_distinct(
+            line,
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::Z,
+            r,
+            1e-5,
+            1e-6,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!((hits[0] - 10.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2241,18 +2268,7 @@ mod tests {
         let eye = v(2.0, 0.0, 3.0);
         let half_rt3 = 3.0f64.sqrt() * 0.5;
 
-        let def = circle_find_silhouette_points(c, n, r, true, eye);
-        let opt_off = circle_find_silhouette_points_opt_in(c, n, r, true, eye, false);
-        let (d1, d2) = def.unwrap().unwrap();
-        assert_eq!(opt_off.unwrap(), Some((d1, d2)));
-        assert!((d1 - v(-0.5, -half_rt3, 0.0)).length() < 1e-14);
-        assert!((d2 - v(-0.5, half_rt3, 0.0)).length() < 1e-14);
-        for d in [d1, d2] {
-            assert!(d.x < 0.0);
-            assert!(((d - eye).dot(d - c) - 2.0).abs() < 1e-13);
-        }
-
-        let fixed = circle_find_silhouette_points_opt_in(c, n, r, true, eye, true);
+        let fixed = circle_find_silhouette_points(c, n, r, true, eye);
         let (p1, p2) = fixed.unwrap().unwrap();
         assert!((p1 - v(0.5, half_rt3, 0.0)).length() < 1e-14);
         assert!((p2 - v(0.5, -half_rt3, 0.0)).length() < 1e-14);
@@ -2274,12 +2290,7 @@ mod tests {
         let r = 3.0;
         let eye = c + 5.0 * u1 + 7.0 * n_unit;
 
-        let def = circle_find_silhouette_points(c, n_unit, r, true, eye);
-        let (d1, d2) = def.unwrap().unwrap();
-        assert!(((d1 - c).length() - r).abs() > 10.0);
-        assert!(((d2 - c).length() - r).abs() > 10.0);
-
-        let fixed = circle_find_silhouette_points_opt_in(c, n_unit, r, true, eye, true);
+        let fixed = circle_find_silhouette_points(c, n_unit, r, true, eye);
         let (p1, p2) = fixed.unwrap().unwrap();
         let exp1 = c + r * (0.6 * u1 + 0.8 * v1);
         let exp2 = c + r * (0.6 * u1 - 0.8 * v1);
@@ -2291,14 +2302,14 @@ mod tests {
             assert!((p - eye).dot(p - c).abs() < 1e-13);
         }
 
-        let scaled = circle_find_silhouette_points_opt_in(c, n_scaled, r, true, eye, true);
+        let scaled = circle_find_silhouette_points(c, n_scaled, r, true, eye);
         let (s1, s2) = scaled.unwrap().unwrap();
         assert!((s1 - p1).length() < 1e-13);
         assert!((s2 - p2).length() < 1e-13);
     }
 
     #[test]
-    fn wr11_inside_radius_parallel_degenerate_and_kernel_wiring() {
+    fn wr11_inside_radius_parallel_and_degenerate() {
         let c = v(10.0, -4.0, 3.0);
         let n = v(1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
         let u1 = v(2.0 / 3.0, -2.0 / 3.0, 1.0 / 3.0);
@@ -2306,46 +2317,30 @@ mod tests {
 
         for dist in [0.0, 1.5, r] {
             let inside_eye = c + dist * u1 + 4.0 * n;
-            let off = circle_find_silhouette_points_opt_in(c, n, r, true, inside_eye, false);
-            let on = circle_find_silhouette_points_opt_in(c, n, r, true, inside_eye, true);
-            assert_eq!(off.unwrap(), None);
+            let on = circle_find_silhouette_points(c, n, r, true, inside_eye);
             assert_eq!(on.unwrap(), None);
         }
 
         let far_eye = c + 5.0 * u1 + 4.0 * n;
-        let zero_n = circle_find_silhouette_points_opt_in(c, Vec3::ZERO, r, true, far_eye, true);
+        let zero_n = circle_find_silhouette_points(c, Vec3::ZERO, r, true, far_eye);
         assert_eq!(zero_n.unwrap(), None);
-        let neg_r = circle_find_silhouette_points_opt_in(c, n, -1.0, true, far_eye, true);
+        let neg_r = circle_find_silhouette_points(c, n, -1.0, true, far_eye);
         assert_eq!(neg_r.unwrap(), None);
 
         let view_dir = v(1.0, -0.5, 0.25);
-        let par_off = circle_find_silhouette_points_opt_in(c, n, r, false, view_dir, false);
-        let par_on = circle_find_silhouette_points_opt_in(c, n, r, false, view_dir, true);
-        let (q1, q2) = par_off.unwrap().unwrap();
-        assert_eq!(par_on.unwrap(), Some((q1, q2)));
+        let par_on = circle_find_silhouette_points(c, n, r, false, view_dir);
+        let (q1, q2) = par_on.unwrap().unwrap();
         for q in [q1, q2] {
             assert!(((q - c).length() - r).abs() < 1e-13);
             assert!((q - c).dot(n).abs() < 1e-13);
             assert!((q - c).dot(view_dir).abs() < 1e-13);
         }
-        let par_axis = circle_find_silhouette_points_opt_in(c, n, r, false, n, true);
+        let par_axis = circle_find_silhouette_points(c, n, r, false, n);
         assert_eq!(par_axis.unwrap(), None);
 
-        let k0 = Kernel::default();
-        assert!(!k0.fixes.circle_silhouette_perspective_center);
-        let mut k1 = Kernel::default();
-        let flag = k1.fixes.flag_mut("circle_silhouette_perspective_center");
-        *flag.unwrap() = true;
-        assert!(k1.fixes.circle_silhouette_perspective_center);
-
-        let def_res = circle_find_silhouette_points(c, n, r, true, far_eye);
-        let k0_res = circle_find_silhouette_points_with_kernel(&k0, c, n, r, true, far_eye);
-        assert_eq!(k0_res, def_res);
-
-        let opt_res = circle_find_silhouette_points_opt_in(c, n, r, true, far_eye, true);
-        let k1_res = circle_find_silhouette_points_with_kernel(&k1, c, n, r, true, far_eye);
-        assert_eq!(k1_res, opt_res);
-        assert!(k1_res.unwrap().is_some());
+        assert!(circle_find_silhouette_points(c, n, r, true, far_eye)
+            .unwrap()
+            .is_some());
     }
 
     /// WR-10: collinear points along each axis are Linear, along the points; pinned

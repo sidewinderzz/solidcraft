@@ -21,7 +21,8 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), and face surfaces classified for a hole's direction.
+/// go), face surfaces classified for a hole's direction, and joins made of bodies that are all
+/// apart without running the kernel's union.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -37,6 +38,7 @@ pub(super) struct Counts {
     pub miss_intersects: usize,
     pub cut_tools: usize,
     pub surfaces: usize,
+    pub joined_apart: usize,
 }
 
 thread_local! {
@@ -55,6 +57,7 @@ thread_local! {
             miss_intersects: 0,
             cut_tools: 0,
             surfaces: 0,
+            joined_apart: 0,
         })
     };
 }
@@ -141,6 +144,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -285,6 +290,24 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
         assert_eq!(work, Counts::default(), "sketch {k} edited");
         assert_eq!(model.last_recomputed, 1);
     }
+}
+
+/// Construction geometry is an input of every feature: moving a construction plane moves the
+/// sketch on it, though the sketch itself is unchanged.
+#[test]
+fn moving_a_construction_plane_moves_the_sketch_on_it() {
+    let mut doc = Document::new("Datum");
+    let offset = |distance: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: distance.into() },
+    };
+    let plane = doc.add_feature(offset("5 mm"), Some("Datum")).unwrap();
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Construction { feature: plane.into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 5.0).abs() < 1e-9);
+    doc.feature_mut(plane).unwrap().kind = offset("12 mm");
+    model.evaluate(&doc);
+    assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
 }
 
 #[test]
@@ -572,6 +595,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
         width: "10".into(),
         height: "4".into(),
         operation: Operation::NewBody,
+        centred: false,
     };
     let plate = doc.add_feature(kind, None).unwrap();
     doc.feature_mut(plate).unwrap().component = comp;
@@ -580,7 +604,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
     let body = model.state().bodies.iter().find(|b| b.feature == plate).unwrap().name.clone();
     for k in 0..holes {
         let corner = point_expr(Vec3::new(10.0 * k as f64 + 4.0, 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         let f = doc.feature_mut(id).unwrap();
         f.component = tools;
@@ -840,6 +864,7 @@ fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() 
                 width: "3".into(),
                 height: "4".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -985,7 +1010,8 @@ fn saved_states_read_back_their_sketch_keys() {
         doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
         for j in 0..3 {
             let corner = point_expr(Vec3::new(f64::from(i) * 20.0, f64::from(j) * 20.0, 0.0));
-            let kind = FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody };
+            let kind =
+                FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody, centred: false };
             doc.add_feature(kind, None).unwrap();
         }
     }
@@ -1071,13 +1097,14 @@ fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
     let y = 100.0 * comp as f64;
     for k in 0..blocks {
         let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
-        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let kind =
+            FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
     for k in 0..cuts {
         let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut, centred: false };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -1279,6 +1306,7 @@ fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
                 width: size[1].to_string().into(),
                 height: size[2].to_string().into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1342,6 +1370,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "40".into(),
         height: "10".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     assert_eq!(cut_work(&mut doc, along).cut, 1);
     // A dome: a sphere's cap rising 10 mm above the circle it stands on. A thin tool drilled into
@@ -1355,6 +1384,7 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
         width: "60".into(),
         height: "40".into(),
         operation: Operation::Cut,
+        centred: false,
     };
     doc.add_feature(below, None).unwrap();
     let mut model = Model::new();
@@ -1450,10 +1480,12 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         thread: Some("M6".into()),
         thread_depth: None,
         hand: crate::thread_forms::ThreadHand::Right,
+        thread_class: None,
         modeled: false,
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -1567,10 +1599,12 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         thread: Some("M6".into()),
         thread_depth: None,
         hand: crate::thread_forms::ThreadHand::Right,
+        thread_class: None,
         modeled: false,
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
@@ -2001,6 +2035,58 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
 }
 
+/// A cut whose target name is taken by another component's sheet, while a body of the cut's own
+/// component was asked for that name, is refused before the sheet is machined (#12141).
+#[test]
+fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
+    let mut doc = Document::new("names");
+    let linked = doc.add_component(Some("Encoder"), 0).unwrap();
+    let local = doc.add_component(Some("Assembly"), 0).unwrap();
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 40.0, 40.0);
+    for f in doc.features.iter_mut() {
+        f.component = linked;
+    }
+    let base = doc.features.last().unwrap().id;
+    doc.feature_mut(base).unwrap().body_names = vec!["Plate".into()];
+    let own = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(own).unwrap().component = local;
+    doc.feature_mut(own).unwrap().body_names = vec!["Plate".into()];
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(10.0, 10.0, -5.0)),
+                length: "5".into(),
+                width: "5".into(),
+                height: "20".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = local;
+    doc.feature_mut(cut).unwrap().participants = vec!["Plate".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
+    assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
+    let st = model.state();
+    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
+}
+
 /// A hole's look at the material over its entry face (#10695) is best effort: when the kernel
 /// cannot build the run-on's column (here a column of no width), the hole keeps its full run-on
 /// and cuts nothing out of its tools, as before the check, instead of failing.
@@ -2017,4 +2103,63 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     let (top, near) = super::hole_run_on(&state, &Plane::XY, 3.0, 1.0);
     assert!((top - 0.25).abs() < 1e-6, "top {top}");
     assert!(near.is_empty());
+}
+
+/// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one
+/// Combine: the model, and the Combine.
+fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
+    let mut doc = Document::new("joined boxes");
+    let mut made = Vec::new();
+    for i in 0..n {
+        let kind = FeatureKind::Box {
+            corner: point_expr(Vec3::new(pitch * i as f64, 0.0, 0.0)),
+            length: "2".into(),
+            width: "2".into(),
+            height: "2".into(),
+            operation: Operation::NewBody,
+            centred: false,
+        };
+        made.push(doc.add_feature(kind, None).unwrap());
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let names: Vec<String> = made.iter().map(|id| model.state().bodies.iter().find(|b| b.feature == *id).unwrap().name.clone()).collect();
+    let (target, tools) = names.split_first().unwrap();
+    let combine = doc
+        .add_feature(
+            FeatureKind::Combine {
+                target: target.clone().into(),
+                tools: tools.iter().map(|t| t.clone().into()).collect(),
+                operation: Operation::Join,
+                keep_tools: false,
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    (model, combine, work)
+}
+
+/// Joining bodies that are all apart runs no kernel union (#3455: 64 separate pegs took the
+/// union 4.5 s, growing with the square of their number): they are one body of several pieces
+/// as they stand. Bodies that meet still go through the union.
+#[test]
+fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
+    let (model, combine, work) = boxes_joined(12, 5.0);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.result(combine));
+    assert_eq!(work.joined_apart, 1, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let body = &st.bodies[0].body;
+    assert_eq!((body.lumps().unwrap().len(), body.face_count()), (12, 72));
+    assert!((kernel::measure(body).unwrap().volume - 96.0).abs() < 1e-9);
+
+    // Each box overlaps the next by half: the kernel's union makes them one piece.
+    let (model, combine, work) = boxes_joined(4, 1.0);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert_eq!(work.joined_apart, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }

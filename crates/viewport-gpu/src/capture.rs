@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use solidcore_record::Vec3;
 use solidcraft_viewport::hatch::Hatch;
 use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
@@ -252,7 +251,13 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         // Multisampled, the picture's texture is written only by the resolve: cleared first, or
         // some AMD Radeon Direct3D 12 drivers read it back black or as garbage (#10140), as the
@@ -263,6 +268,10 @@ impl Capturer {
             state.resolve_clears += _cleared;
         }
         state.renderer.prepare(device, queue, &mut encoder, frame);
+        if let Some(reason) = state.renderer.take_refused_upload() {
+            let _ = caught(scopes);
+            return Err(GpuError::Render(reason));
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -435,6 +444,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         pv_hide: false,
         preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height.max(1)), scene.radius.max(1.0)).to_f32(),
+        turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
@@ -466,12 +476,17 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
     let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    // Wooden bodies need entries of their own too: each carries its own grain frame.
+    let wooded = scene.meshes.iter().any(|m| m.wood.is_some() || !m.face_woods.is_empty());
+    let own_entries = by_part || wooded;
     // Per body, its colours' stable entries (by part), and the stable palette they make.
     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
     let mut stable: Vec<[u8; 4]> = Vec::new();
     let mut hatches: Vec<(PaletteIndex, Hatch)> = Vec::new();
     let c4 = |m: &SceneMesh, c: Rgb| [c.0, c.1, c.2, (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8];
-    if by_part {
+    // Per body, its wooden faces' entries: (face or `None` for the body's own wood, entry).
+    let mut wood_entries: Vec<Vec<(Option<u32>, PaletteIndex)>> = Vec::new();
+    if own_entries {
         for m in &scene.meshes {
             let mut map = HashMap::new();
             for c in std::iter::once(m.color).chain(m.face_colors.iter().map(|(_, c)| *c)) {
@@ -482,33 +497,63 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
                     i
                 });
             }
+            // A wooden face takes an entry of its own (its colour may match a plain face's).
+            let mut woods = Vec::new();
+            for f in m.wood.iter().map(|_| None).chain(m.face_woods.iter().map(|(f, _)| Some(*f))) {
+                let c = f.and_then(|f| m.face_colors.iter().find(|(i, _)| *i == f).map(|(_, c)| *c)).unwrap_or(m.color);
+                let i = PaletteIndex(u32::try_from(stable.len()).unwrap_or(0));
+                stable.push(c4(m, c));
+                hatches.push((i, m.hatch));
+                woods.push((f, i));
+            }
             own.push(map);
+            wood_entries.push(woods);
         }
     }
     let mut palette = Palette::with_stable(stable);
-    for (i, h) in hatches {
-        palette.set_hatch(i, h);
+    if by_part {
+        for (i, h) in hatches {
+            palette.set_hatch(i, h);
+        }
+    }
+    for (m, woods) in scene.meshes.iter().zip(&wood_entries) {
+        for (f, entry) in woods {
+            let shade = match f {
+                None => m.wood.as_ref(),
+                Some(f) => m.face_woods.iter().find(|(i, _)| i == f).map(|(_, w)| w),
+            };
+            let record = shade.and_then(|w| palette.add_wood(w));
+            palette.set_wood(*entry, record);
+        }
     }
     let mut sc = GpuScene::with_palette(palette);
     for (mi, m) in scene.meshes.iter().enumerate() {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let rgba = c4(m, mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color));
-            let col = match own.get(mi).and_then(|o| o.get(&rgba)) {
-                Some(i) => *i,
+            let face = mesh.tri_face.get(ti).copied();
+            let rgba = c4(m, face.and_then(|f| faces.get(&f)).copied().unwrap_or(m.color));
+            // The wooden face's (or body's) own entry, if it has wood.
+            let wood = m.wood_at(face).and_then(|_| {
+                let key = face.filter(|f| m.face_woods.iter().any(|(i, _)| i == f));
+                wood_entries.get(mi).and_then(|w| w.iter().find(|(f, _)| *f == key)).map(|(_, i)| *i)
+            });
+            let col = match wood.or_else(|| own.get(mi).and_then(|o| o.get(&rgba)).copied()) {
+                Some(i) => i,
                 None => sc.color(rgba),
             };
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
-                if m.glass() {
-                    sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else if m.closed {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
-                } else {
-                    sc.open_tri(p.to_f32(), n.to_f32(), col);
+                // A mesh with values gives each vertex its own ([`SceneMesh::values`]).
+                match m.values.as_ref().and_then(|v| v.get(*k as usize)).copied() {
+                    Some(value) if m.glass() => sc.glass_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) if m.closed => sc.tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) => sc.open_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    None if m.glass() => sc.glass_tri(p.to_f32(), n.to_f32(), col),
+                    None if m.closed => sc.tri(p.to_f32(), n.to_f32(), col),
+                    None => sc.open_tri(p.to_f32(), n.to_f32(), col),
                 }
             }
         }
@@ -575,7 +620,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -583,11 +628,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -633,7 +674,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::TRI_SIZE;
+    use crate::view::{TRI_COLOR_AT, TRI_SIZE};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -650,7 +691,7 @@ mod tests {
 
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
-        let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
+        let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
     }
 
@@ -666,6 +707,9 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
+            values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
@@ -816,6 +860,9 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
+            values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
