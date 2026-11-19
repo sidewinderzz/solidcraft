@@ -449,18 +449,18 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     // and branch alike, so a branch is not drawn over the trunk's rings: it is a second, thin
     // cone of growth, and further down the two are joined into one (`bt`: when the branch's
     // wood here grew, as mm of trunk radius; `bw`: how much of a branch there is here;
-    // `bthick`: how fast it thickens against the trunk). `lift` (mm) raises the rings around
+    // `bthick`: how fast it thickens against the trunk; `bdark`: how much darker its wood is). `lift` (mm) raises the rings around
     // pin knots and burl eyes, `knot` is their darker wood, `kd` and `kring` their own rings.
     let mut lift = 0.0;
     let mut knot = 0.0;
     let mut kd = 0.0;
     let mut kring = 0.0;
     let mut halo: f32 = 0.0;
-    let mut check = 0.0;
-    let mut bark = 0.0;
+    let mut bdark = 0.0;
     let mut bw = 0.0;
     let mut bt = 0.0;
     let mut bthick = 1.0;
+    let mut bd = 0.0;
     if l.knots > 0.0 {
         let cell = (g[0] / 300.0).floor();
         let ci = cell as i32;
@@ -480,7 +480,7 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let reach = out.max(0.0);
             let u = g[0] - (cell + 0.2 + 0.25 * h1) * 300.0 - lean * 160.0 * reach / (reach + 160.0);
             // Only where the branch is, and nothing of it reaches the next 300 mm.
-            bw = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(30.0, 60.0, u.abs()));
+            bw = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(35.0, 60.0, u.abs()));
             // Across the leaning branch; its wood is laid a little longer along the trunk's
             // grain than across it, and never quite round.
             let d0 = (u * u / (1.0 + lean * lean) + side * side).sqrt();
@@ -489,12 +489,24 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             bthick = (0.08 + 0.14 * h4) * (1.0 - 0.45 * l.pins);
             // The branch's tip passed here early (it grows in length far faster than the trunk
             // in girth), and it has thickened since.
-            bt = reach / 6.0 + d / bthick;
-            // Its pith: a small, ragged dark heart, with a few short drying cracks.
-            let spoke = noise([5.0 * u / (d0 + 1.0e-3) + 23.0 * h2, 5.0 * side / (d0 + 1.0e-3) + 23.0 * h4, 7.0 * h1], s ^ 0x61c8_8647);
-            let heart = 0.8 + 1.4 * h3;
-            bark = bw * (1.0 - smoothstep(0.6, 1.0, d0 / heart * (1.0 + 0.8 * (spoke - 0.5))));
-            check = bw * smoothstep(0.86, 0.95, spoke) * (1.0 - smoothstep(heart, 3.5 * heart, d0));
+            // (and ever more slowly: an old branch stays slim.)
+            let slow = d * d * d * d / 10000.0;
+            bt = reach / 6.0 + d * (1.0 + slow) / bthick;
+            bd = d;
+            // The trunk makes way for the branch from far off: its rings rise toward it in a
+            // long, pointed lens (longest down the trunk), and its fibres part around it.
+            let rk = (0.8 * bthick * reach).min(14.0) + 2.0;
+            let tail = if u < 0.0 { 26.0 } else { 9.0 };
+            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (tail * rk * rk);
+            // (Fading gently over the whole of the branch's 120 mm of trunk.)
+            let fade = (1.0 - u * u / 3600.0).max(0.0);
+            let near = smoothstep(0.0, 8.0, out) * fade * fade;
+            lift = near * 1.2 * rk / (1.0 + 0.5 * lens * lens);
+            let wide = 1.5 * rk;
+            let part = -near * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
+            g = [g[0], g[1] - part * az, g[2] + part * ay];
+            // Most knots are only a shade darker than the trunk, a few much darker.
+            bdark = 0.15 + 0.6 * h3 * h3;
         }
     }
     // Pin knots: small shoots that start somewhere out in the trunk, in loose groups.
@@ -518,7 +530,7 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (12.0 * rk * rk);
             lift += there * 1.5 * rk / (1.0 + 0.8 * lens * lens);
             halo = halo.max(there / (1.0 + 0.3 * pd * pd * pd * pd));
-            let pin = there * (1.0 - smoothstep(0.75, 1.05, pd));
+            let pin = there * 0.55 * (1.0 - smoothstep(0.5, 1.1, pd));
             if pin > knot {
                 knot = pin;
                 kd = pd;
@@ -579,12 +591,18 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let mut branch = 0.0;
     if bw > 0.0 {
         let w = 0.8 * trunk.max(0.0) + 2.0;
-        let h = (0.5 + 0.5 * (bt - trunk) / w).clamp(0.0, 1.0);
-        rr = mixf(trunk, mixf(bt, trunk, h) - w * h * (1.0 - h), bw);
-        branch = bw * (1.0 - h);
+        // The branch stops thickening in time, and it ends before the next 300 mm: there
+        // its wood comes so late that the trunk's is always first. So the two stay one
+        // growth everywhere, and no ring of one ever crosses a ring of the other.
+        let late = bt + 8.0 * w * (1.0 - bw) * (1.0 - bw) + 2.0 * (trunk.max(0.0) + w) * smoothstep(22.0, 34.0, bd);
+        // (Late enough is late enough: huge numbers would only lose the trunk's digits.)
+        let late = late.min(trunk + w);
+        let h = (0.5 + 0.5 * (late - trunk) / w).clamp(0.0, 1.0);
+        rr = mixf(late, trunk, h) - w * h * (1.0 - h);
+        branch = 1.0 - h;
     }
-    // The branch's wood is only a shade darker than the trunk's.
-    let knot = knot.max(0.25 * branch);
+    // The branch's wood is its own, darker shade: no outline, only its tighter rings.
+    let knot = knot.max(bdark * branch);
     // Rings a pixel crosses: its steps, taken outward from the pith.
     let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * ring_mm);
     // (A branch's rings are finer.)
@@ -666,7 +684,6 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         // (Darker than the timber even in a pale wood.)
         let heart = l.late[k] * mixf(l.streak[k], 1.0, 0.45) * (0.95 - 0.55 * l.late[1]);
         let flecked = mixf(flecked, heart, knot * (0.7 + 0.3 * knot_ring));
-        let flecked = mixf(flecked, heart * 0.45, (0.6 * check).max(0.9 * bark));
         *ck =
             (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }
@@ -1071,11 +1088,11 @@ mod tests {
         assert!((100..12000).contains(&differ(&clear, &knotty)), "{}", differ(&clear, &knotty));
         // Burl is everywhere.
         assert!(differ(&clear, &burl) > 12000, "{}", differ(&clear, &burl));
-        let darkest = |v: &[f32]| v.iter().copied().fold(1.0, f32::min);
-        assert!(darkest(&knotty) < darkest(&clear) - 0.05, "a knot is darker than clear wood");
-        // The trunk's wood makes way well beyond the knot itself, which is the darkest part.
-        let dark = knotty.iter().filter(|v| **v < darkest(&clear) - 0.05).count();
-        assert!(differ(&clear, &knotty) > 3 * dark, "{} of {dark}", differ(&clear, &knotty));
+        // A knot has no outline and no blot: it is the branch's own, tighter rings, darker
+        // on the whole than the trunk's wood (seen here without the rings themselves).
+        let flat = WoodLook { contrast: 0.0, ..l };
+        let (was, is): (f32, f32) = (picture(&flat).iter().sum(), picture(&WoodLook { knots: 1.0, ..flat }).iter().sum());
+        assert!(is < was - 1.0, "where a knot is, the wood is darker: {is} against {was}");
         // And no branch shows past its own 300 mm of the log: the wood has no step there.
         let l = WoodLook { knots: 1.0, ..l };
         for i in 0..4000 {
