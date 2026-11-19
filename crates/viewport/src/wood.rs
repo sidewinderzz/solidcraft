@@ -434,13 +434,18 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     }
     let vary = l.variation.clamp(0.0, 2.0);
     let ring_mm = l.ring_mm * mixf(1.0, 0.7 + 0.7 * grew, vary.min(1.0));
-    // Knots: every 300 mm of the log may carry a branch, growing straight out from the pith in
-    // its own direction and widening as it goes. The trunk's rings rise around it like a tent
-    // (`lift`, mm), `knot` is the branch's own wood and `kd` the distance from its middle in
-    // knot radii.
+    // Knots: every 300 mm of the log may carry a branch, growing out from the pith in its own
+    // direction, leaning up the trunk and widening as it goes. The trunk's wood makes way for
+    // it: its fibres part around the branch and close again behind it (`part`, a sideways
+    // shift like a stream around a stone, longer along the grain than across), and its rings
+    // rise up the branch like a tent (`lift`, mm). `knot` is the branch's own wood, `kd` the
+    // distance from its middle in knot radii (its outline is not quite round), `kring` counts
+    // its own rings and `halo` is the dense, darker wood packed around it.
     let mut lift = 0.0;
     let mut knot = 0.0;
     let mut kd = 0.0;
+    let mut kring = 0.0;
+    let mut halo = 0.0;
     if l.knots > 0.0 {
         let cell = (g[0] / 300.0).floor();
         let ci = cell as i32;
@@ -449,19 +454,34 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let h2 = hash(ci, 3, 11, s ^ 0x7f4a_7c15);
             let h3 = hash(ci, 4, 11, s ^ 0x7f4a_7c15);
             let h4 = hash(ci, 5, 11, s ^ 0x7f4a_7c15);
+            let h5 = hash(ci, 6, 11, s ^ 0x7f4a_7c15);
             // The branch's direction across the grain (a unit vector).
             let ay = 2.0 * h2 - 1.0;
             let az = if h3 < 0.5 { -1.0 } else { 1.0 } * (1.0 - ay * ay).max(0.0).sqrt();
             let out = g[1] * ay + g[2] * az;
             let side = g[2] * ay - g[1] * az;
-            let u = g[0] - (cell + 0.3 + 0.4 * h1) * 300.0;
-            let rk = (3.0 + 9.0 * h4) * (0.4 + 0.6 * smoothstep(0.0, 120.0, out));
-            let there = smoothstep(0.0, 8.0, out);
-            kd = (u * u + side * side).sqrt() / rk;
+            // It leans up the trunk (never out of its 300 mm), so a face cuts it at a slant.
+            let lean = 0.25 + 0.4 * h5;
+            let reach = out.max(0.0);
+            let u = g[0] - (cell + 0.2 + 0.25 * h1) * 300.0 - lean * 160.0 * reach / (reach + 160.0);
+            let rk = (4.0 + 10.0 * h4) * (0.45 + 0.55 * smoothstep(0.0, 120.0, out));
+            // Only where the branch is, and nothing of it reaches the next 300 mm.
+            let there = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(30.0, 60.0, u.abs()));
+            // Across the leaning branch.
+            let d = (u * u / (1.0 + lean * lean) + side * side).sqrt();
+            let wob = noise([1.6 * u / (d + 1.0e-3) + 40.0 * h1, 1.6 * side / (d + 1.0e-3) + 40.0 * h2, out * 0.03], s ^ 0x4cf5_ad43) - 0.5;
+            kd = d / rk * (1.0 + 0.35 * wob);
+            kring = kd * (3.0 + 4.0 * h3) + 1.5 * (noise([u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03], s ^ 0x2f0b_3c61) - 0.5);
+            knot = there * (1.0 - smoothstep(0.88, 1.04, kd));
             // The trunk's fibres part around the branch: farther along the grain than across.
-            let far = (u * u * 0.36 + side * side).sqrt() / rk;
-            lift = there * 1.3 * rk * (1.0 - smoothstep(0.3, 4.5, far));
-            knot = there * (1.0 - smoothstep(0.85, 1.05, kd));
+            let wide = 1.7 * rk;
+            let part = -there * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
+            let far = (u * u * 0.09 + side * side).sqrt() / rk;
+            // The tent's foot is a pointed lens, long along the grain.
+            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (10.0 * rk * rk);
+            lift = there * 2.2 * rk / (1.0 + 0.8 * lens * lens);
+            halo = there / (1.0 + 0.5 * far * far * far * far);
+            g = [g[0], g[1] - part * az, g[2] + part * ay];
         }
     }
     // Burl: the grain swirls the same in every direction (two sizes of swirl), around eyes:
@@ -487,7 +507,10 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let eye = l.burl.min(1.0) * (1.0 - smoothstep(0.0, 3.0, ed));
             lift += 3.0 * re * eye;
             knot = knot.max(l.burl.min(1.0) * (1.0 - smoothstep(0.5, 1.0, ed)));
-            kd = if ed < 1.0 { ed } else { kd };
+            if ed < 1.0 {
+                kd = ed;
+                kring = ed * 4.0;
+            }
         }
     }
     // Figure: the rings wander, slowly along the grain and a little faster across it.
@@ -574,14 +597,16 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let line = smoothstep(0.88, 0.97, t) * wrap * thin * l.contrast * depth.min(1.0);
     // Ripple: faint bands across the grain, where the fibres dip and rise.
     let ripple = mixf(1.0, 0.95 + 0.1 * noise(scaled(g, 0.06, 0.012), s ^ 0x1f83_d9ab), 1.0 - smoothstep(5.0, 16.0, along));
-    let knot_ring = smoothstep(0.5, 1.0, (kd * 4.0 - (kd * 4.0).floor() - 0.5).abs() * 2.0).max(smoothstep(0.7, 1.0, kd));
+    let knot_ring = smoothstep(0.5, 1.0, (kring - kring.floor() - 0.5).abs() * 2.0).max(smoothstep(0.7, 1.0, kd));
     let mut c = [0f32; 3];
     for (k, ck) in c.iter_mut().enumerate() {
         let base = mixf(mixf(l.early[k], l.light[k], zone), l.late[k], late);
         let streaked = mixf(base, l.streak[k], streak);
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
-        // A knot is dense, dark wood with rings of its own, darkest at its rim and its heart.
-        let flecked = mixf(flecked, l.late[k] * mixf(l.streak[k], 1.0, 0.45), knot * (0.75 + 0.25 * knot_ring));
+        // A knot is dense, dark wood with rings of its own, darkest at its rim and its heart,
+        // and the wood packed around it is a little darker too.
+        let flecked = mixf(flecked, l.late[k], 0.3 * halo);
+        let flecked = mixf(flecked, l.late[k] * mixf(l.streak[k], 1.0, 0.45), knot * (0.7 + 0.3 * knot_ring));
         *ck =
             (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }
@@ -988,6 +1013,17 @@ mod tests {
         assert!(differ(&clear, &burl) > 12000, "{}", differ(&clear, &burl));
         let darkest = |v: &[f32]| v.iter().copied().fold(1.0, f32::min);
         assert!(darkest(&knotty) < darkest(&clear) - 0.05, "a knot is darker than clear wood");
+        // The trunk's wood makes way well beyond the knot itself, which is the darkest part.
+        let dark = knotty.iter().filter(|v| **v < darkest(&clear) - 0.05).count();
+        assert!(differ(&clear, &knotty) > 3 * dark, "{} of {dark}", differ(&clear, &knotty));
+        // And no branch shows past its own 300 mm of the log: the wood has no step there.
+        let l = WoodLook { knots: 1.0, ..l };
+        for i in 0..4000 {
+            let (x, a) = (300.0 * (1 + i % 8) as f32, i as f32 * 0.0731);
+            let r = 5.0 + (i % 97) as f32 * 2.5;
+            let at = |x: f32| sample(&l, [x, r * a.cos(), r * a.sin()], [0.0; 3], [0.0; 3]).srgb[0];
+            assert!((at(x - 0.004) - at(x + 0.004)).abs() < 0.03, "a step at {x}, {r} mm out");
+        }
     }
 
     /// Turning the grain 90 degrees on a board's face runs it across the board; a roll keeps
