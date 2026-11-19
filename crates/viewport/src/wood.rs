@@ -445,19 +445,22 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let vary = l.variation.clamp(0.0, 2.0);
     let ring_mm = l.ring_mm * mixf(1.0, 0.7 + 0.7 * grew, vary.min(1.0));
     // Knots: every 300 mm of the log may carry a branch, growing out from the pith in its own
-    // direction, leaning up the trunk and widening as it goes. The trunk's wood makes way for
-    // it: its fibres part around the branch and close again behind it (`part`, a sideways
-    // shift like a stream around a stone, longer along the grain than across), and its rings
-    // rise up the branch like a tent (`lift`, mm). `knot` is the branch's own wood, `kd` the
-    // distance from its middle in knot radii (its outline is not quite round), `kring` counts
-    // its own rings and `halo` is the dense, darker wood packed around it.
+    // direction and leaning up the trunk. A tree lays each year's wood as one skin over trunk
+    // and branch alike, so a branch is not drawn over the trunk's rings: it is a second, thin
+    // cone of growth, and further down the two are joined into one (`bt`: when the branch's
+    // wood here grew, as mm of trunk radius; `bw`: how much of a branch there is here;
+    // `bthick`: how fast it thickens against the trunk). `lift` (mm) raises the rings around
+    // pin knots and burl eyes, `knot` is their darker wood, `kd` and `kring` their own rings.
     let mut lift = 0.0;
     let mut knot = 0.0;
     let mut kd = 0.0;
     let mut kring = 0.0;
-    let mut halo = 0.0;
+    let mut halo: f32 = 0.0;
     let mut check = 0.0;
     let mut bark = 0.0;
+    let mut bw = 0.0;
+    let mut bt = 0.0;
+    let mut bthick = 1.0;
     if l.knots > 0.0 {
         let cell = (g[0] / 300.0).floor();
         let ci = cell as i32;
@@ -476,31 +479,22 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let lean = 0.25 + 0.4 * h5;
             let reach = out.max(0.0);
             let u = g[0] - (cell + 0.2 + 0.25 * h1) * 300.0 - lean * 160.0 * reach / (reach + 160.0);
-            let rk = (5.0 + 11.0 * h4) * (1.0 - 0.45 * l.pins) * (0.45 + 0.55 * smoothstep(0.0, 120.0, out));
             // Only where the branch is, and nothing of it reaches the next 300 mm.
-            let there = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(30.0, 60.0, u.abs()));
-            // Across the leaning branch.
-            let d = (u * u / (1.0 + lean * lean) + side * side).sqrt();
-            let wob = noise([1.6 * u / (d + 1.0e-3) + 40.0 * h1, 1.6 * side / (d + 1.0e-3) + 40.0 * h2, out * 0.03], s ^ 0x4cf5_ad43) - 0.5;
-            kd = d / rk * (1.0 + 0.35 * wob);
-            kring = kd * (5.0 + 5.0 * h3) + 1.5 * (noise([u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03], s ^ 0x2f0b_3c61) - 0.5);
-            knot = there * 0.3 * (1.0 - smoothstep(0.4, 1.2, kd));
-            // The trunk's fibres part around the branch: farther along the grain than across.
-            let wide = 1.7 * rk;
-            let part = -there * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
-            let far = (u * u * if u < 0.0 { 0.04 } else { 0.12 } + side * side).sqrt() / rk;
-            // The tent's foot is a pointed lens, long along the grain and longest down the
-            // trunk, where the grain closes again slowly (a comet's tail).
-            let tail = if u < 0.0 { 26.0 } else { 9.0 };
-            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (tail * rk * rk);
-            // What shows of the branch itself is small: a ragged dark heart (`bark`) with
-            // drying cracks running out of it. The rest of the knot is only a shade darker.
-            let spoke = noise([5.0 * u / (d + 1.0e-3) + 23.0 * h2, 5.0 * side / (d + 1.0e-3) + 23.0 * h4, 7.0 * h1], s ^ 0x61c8_8647);
-            check = there * smoothstep(0.86, 0.95, spoke) * (1.0 - smoothstep(0.2, 0.5, kd));
-            bark = there * (1.0 - smoothstep(0.6, 1.0, d / (0.3 * rk) * (1.0 + 0.8 * (spoke - 0.5))));
-            lift = there * rk * (1.3 / (1.0 + 0.5 * lens * lens) + 1.1 / (1.0 + 0.6 * lens * lens * lens * lens));
-            halo = there / (1.0 + 0.5 * far * far * far * far);
-            g = [g[0], g[1] - part * az, g[2] + part * ay];
+            bw = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(30.0, 60.0, u.abs()));
+            // Across the leaning branch; its wood is laid a little longer along the trunk's
+            // grain than across it, and never quite round.
+            let d0 = (u * u / (1.0 + lean * lean) + side * side).sqrt();
+            let wob = noise([1.6 * u / (d0 + 1.0e-3) + 40.0 * h1, 1.6 * side / (d0 + 1.0e-3) + 40.0 * h2, out * 0.03], s ^ 0x4cf5_ad43) - 0.5;
+            let d = (u * u * 0.2 / (1.0 + lean * lean) + side * side).sqrt() * (1.0 + 0.3 * wob);
+            bthick = (0.08 + 0.14 * h4) * (1.0 - 0.45 * l.pins);
+            // The branch's tip passed here early (it grows in length far faster than the trunk
+            // in girth), and it has thickened since.
+            bt = reach / 6.0 + d / bthick;
+            // Its pith: a small, ragged dark heart, with a few short drying cracks.
+            let spoke = noise([5.0 * u / (d0 + 1.0e-3) + 23.0 * h2, 5.0 * side / (d0 + 1.0e-3) + 23.0 * h4, 7.0 * h1], s ^ 0x61c8_8647);
+            let heart = 0.8 + 1.4 * h3;
+            bark = bw * (1.0 - smoothstep(0.6, 1.0, d0 / heart * (1.0 + 0.8 * (spoke - 0.5))));
+            check = bw * smoothstep(0.86, 0.95, spoke) * (1.0 - smoothstep(heart, 3.5 * heart, d0));
         }
     }
     // Pin knots: small shoots that start somewhere out in the trunk, in loose groups.
@@ -572,17 +566,32 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let y = g[1] + l.figure_mm * (2.0 * dy + 9.0 * ey);
     let z = g[2] + l.figure_mm * (2.0 * dz + 9.0 * ez);
     let r = (y * y + z * z).sqrt();
-    // Rings a pixel crosses: its steps, taken outward from the pith.
-    let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * ring_mm);
-    let rings = 1.0 - smoothstep(0.35, 1.0, fr);
-    let thin = 1.0 - smoothstep(0.08, 0.35, fr);
     // A log is not round: it grows faster on some sides than on others (lobes around the pith
     // that drift along it), and it tapers, so a ring lies closer to the pith farther up.
     let uy = y / (r + 1.0e-3);
     let uz = z / (r + 1.0e-3);
     let lobe = noise([g[0] * 0.0015 + 3.0, 1.3 * uy + 7.0, 1.3 * uz + 13.0], s ^ 0x243f_6a88) - 0.5;
     let lobe2 = noise([g[0] * 0.004 + 11.0, 3.1 * uy + 5.0, 3.1 * uz + 29.0], s ^ 0xb7e1_5162) - 0.5;
-    let rr = r * (1.0 + vary * (0.22 * lobe + 0.07 * lobe2 * smoothstep(5.0, 60.0, r))) + vary * 0.006 * g[0] - lift;
+    let trunk = r * (1.0 + vary * (0.22 * lobe + 0.07 * lobe2 * smoothstep(5.0, 60.0, r))) + vary * 0.006 * g[0] - lift;
+    // Trunk and branch are one growth: whichever laid its wood here first, joined smoothly
+    // where they meet (the collar), so a ring of the trunk turns and runs up the branch.
+    let mut rr = trunk;
+    let mut branch = 0.0;
+    if bw > 0.0 {
+        let w = 0.8 * trunk.max(0.0) + 2.0;
+        let h = (0.5 + 0.5 * (bt - trunk) / w).clamp(0.0, 1.0);
+        rr = mixf(trunk, mixf(bt, trunk, h) - w * h * (1.0 - h), bw);
+        branch = bw * (1.0 - h);
+    }
+    // The branch's wood is only a shade darker than the trunk's.
+    let knot = knot.max(0.25 * branch);
+    // Rings a pixel crosses: its steps, taken outward from the pith.
+    let fr = ((y * fx[1] + z * fx[2]).abs() + (y * fy[1] + z * fy[2]).abs()) / (r.max(1.0e-3) * ring_mm);
+    // (A branch's rings are finer.)
+    let fr = fr.max(branch * across.max(along) / (bthick * ring_mm));
+    // (And fainter.)
+    let rings = (1.0 - smoothstep(0.35, 1.0, fr)) * (1.0 - 0.55 * branch);
+    let thin = (1.0 - smoothstep(0.08, 0.35, fr)) * (1.0 - 0.6 * branch);
     // The years, counted out from the pith: good and lean decades and single odd years (the
     // rings bunch up and spread out, differently on each side of the log), and small waves.
     let ring0 = rr / ring_mm;
