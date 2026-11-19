@@ -484,7 +484,7 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let wob = noise([1.6 * u / (d + 1.0e-3) + 40.0 * h1, 1.6 * side / (d + 1.0e-3) + 40.0 * h2, out * 0.03], s ^ 0x4cf5_ad43) - 0.5;
             kd = d / rk * (1.0 + 0.35 * wob);
             kring = kd * (5.0 + 5.0 * h3) + 1.5 * (noise([u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03], s ^ 0x2f0b_3c61) - 0.5);
-            knot = there * (1.0 - smoothstep(0.88, 1.04, kd));
+            knot = there * 0.3 * (1.0 - smoothstep(0.4, 1.2, kd));
             // The trunk's fibres part around the branch: farther along the grain than across.
             let wide = 1.7 * rk;
             let part = -there * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
@@ -493,12 +493,12 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             // trunk, where the grain closes again slowly (a comet's tail).
             let tail = if u < 0.0 { 26.0 } else { 9.0 };
             let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (tail * rk * rk);
-            // Drying cracks from the knot's heart, and bark grown in along part of its rim.
+            // What shows of the branch itself is small: a ragged dark heart (`bark`) with
+            // drying cracks running out of it. The rest of the knot is only a shade darker.
             let spoke = noise([5.0 * u / (d + 1.0e-3) + 23.0 * h2, 5.0 * side / (d + 1.0e-3) + 23.0 * h4, 7.0 * h1], s ^ 0x61c8_8647);
-            check = there * smoothstep(0.78, 0.9, spoke) * smoothstep(0.05, 0.25, kd) * (1.0 - smoothstep(0.55, 0.95, kd));
-            let arc = 2.0 * h5 - 1.0;
-            bark = there * smoothstep(-0.3, 0.5, (u * arc + side * (1.0 - arc * arc).max(0.0).sqrt()) / (d + 1.0e-3)) * smoothstep(0.8, 0.95, kd) * (1.0 - smoothstep(1.02, 1.14, kd));
-            lift = there * rk * (1.6 / (1.0 + 0.5 * lens * lens) + 3.4 / (1.0 + 0.6 * lens * lens * lens * lens));
+            check = there * smoothstep(0.86, 0.95, spoke) * (1.0 - smoothstep(0.2, 0.5, kd));
+            bark = there * (1.0 - smoothstep(0.6, 1.0, d / (0.3 * rk) * (1.0 + 0.8 * (spoke - 0.5))));
+            lift = there * rk * (1.3 / (1.0 + 0.5 * lens * lens) + 1.1 / (1.0 + 0.6 * lens * lens * lens * lens));
             halo = there / (1.0 + 0.5 * far * far * far * far);
             g = [g[0], g[1] - part * az, g[2] + part * ay];
         }
@@ -522,7 +522,7 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let there = smoothstep(start, start + 10.0, out) * (1.0 - smoothstep(12.0, 24.0, u.abs()));
             let pd = (u * u + side * side).sqrt() / rk;
             let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (12.0 * rk * rk);
-            lift += there * 2.5 * rk / (1.0 + 0.8 * lens * lens);
+            lift += there * 1.5 * rk / (1.0 + 0.8 * lens * lens);
             halo = halo.max(there / (1.0 + 0.3 * pd * pd * pd * pd));
             let pin = there * (1.0 - smoothstep(0.75, 1.05, pd));
             if pin > knot {
@@ -653,11 +653,11 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         let flecked = mixf(streaked, l.light[k], 0.35 * fleck);
         // A knot is dense, dark wood with rings of its own, darkest at its rim and its heart,
         // and the wood packed around it is a little darker too.
-        let flecked = mixf(flecked, l.late[k], 0.3 * halo);
+        let flecked = mixf(flecked, l.late[k], 0.18 * halo);
         // (Darker than the timber even in a pale wood.)
         let heart = l.late[k] * mixf(l.streak[k], 1.0, 0.45) * (0.95 - 0.55 * l.late[1]);
         let flecked = mixf(flecked, heart, knot * (0.7 + 0.3 * knot_ring));
-        let flecked = mixf(flecked, heart * 0.35, (0.8 * check).max(0.9 * bark));
+        let flecked = mixf(flecked, heart * 0.45, (0.6 * check).max(0.9 * bark));
         *ck =
             (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }

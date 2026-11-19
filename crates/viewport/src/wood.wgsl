@@ -157,7 +157,7 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
             let wob = wood_noise(vec3<f32>(1.6 * u / (d + 1.0e-3) + 40.0 * h1, 1.6 * side / (d + 1.0e-3) + 40.0 * h2, out * 0.03), s ^ 0x4cf5ad43u) - 0.5;
             kd = d / rk * (1.0 + 0.35 * wob);
             kring = kd * (5.0 + 5.0 * h3) + 1.5 * (wood_noise(vec3<f32>(u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03), s ^ 0x2f0b3c61u) - 0.5);
-            knot = there * (1.0 - wood_smooth(0.88, 1.04, kd));
+            knot = there * 0.3 * (1.0 - wood_smooth(0.4, 1.2, kd));
             let wide = 1.7 * rk;
             let part = -there * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
             var tail = 9.0;
@@ -166,10 +166,9 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
             let far = sqrt(u * u * reachu + side * side) / rk;
             let lens = sqrt(side * side / (rk * rk) + 0.1) + u * u / (tail * rk * rk);
             let spoke = wood_noise(vec3<f32>(5.0 * u / (d + 1.0e-3) + 23.0 * h2, 5.0 * side / (d + 1.0e-3) + 23.0 * h4, 7.0 * h1), s ^ 0x61c88647u);
-            check = there * wood_smooth(0.78, 0.9, spoke) * wood_smooth(0.05, 0.25, kd) * (1.0 - wood_smooth(0.55, 0.95, kd));
-            let arc = 2.0 * h5 - 1.0;
-            bark = there * wood_smooth(-0.3, 0.5, (u * arc + side * sqrt(max(1.0 - arc * arc, 0.0))) / (d + 1.0e-3)) * wood_smooth(0.8, 0.95, kd) * (1.0 - wood_smooth(1.02, 1.14, kd));
-            lift = there * rk * (1.6 / (1.0 + 0.5 * lens * lens) + 3.4 / (1.0 + 0.6 * lens * lens * lens * lens));
+            check = there * wood_smooth(0.86, 0.95, spoke) * (1.0 - wood_smooth(0.2, 0.5, kd));
+            bark = there * (1.0 - wood_smooth(0.6, 1.0, d / (0.3 * rk) * (1.0 + 0.8 * (spoke - 0.5))));
+            lift = there * rk * (1.3 / (1.0 + 0.5 * lens * lens) + 1.1 / (1.0 + 0.6 * lens * lens * lens * lens));
             halo = there / (1.0 + 0.5 * far * far * far * far);
             g = vec3<f32>(g.x, g.y - part * az, g.z + part * ay);
         }
@@ -193,7 +192,7 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
             let there = wood_smooth(start, start + 10.0, out) * (1.0 - wood_smooth(12.0, 24.0, abs(u)));
             let pd = sqrt(u * u + side * side) / rk;
             let lens = sqrt(side * side / (rk * rk) + 0.1) + u * u / (12.0 * rk * rk);
-            lift = lift + there * 2.5 * rk / (1.0 + 0.8 * lens * lens);
+            lift = lift + there * 1.5 * rk / (1.0 + 0.8 * lens * lens);
             halo = max(halo, there / (1.0 + 0.3 * pd * pd * pd * pd));
             let pin = there * (1.0 - wood_smooth(0.75, 1.05, pd));
             if (pin > knot) {
@@ -288,10 +287,10 @@ fn wood_sample(slot: u32, g_in: vec3<f32>, fx_in: vec3<f32>, fy_in: vec3<f32>) -
     let base = mix(mix(early.xyz, light, zone), late_c.xyz, late);
     let streaked = mix(base, streak_c.xyz, streak);
     let knot_ring = max(wood_smooth(0.5, 1.0, abs(kring - floor(kring) - 0.5) * 2.0), wood_smooth(0.7, 1.0, kd));
-    let flecked0 = mix(mix(streaked, light, 0.35 * fleck), late_c.xyz, 0.3 * halo);
+    let flecked0 = mix(mix(streaked, light, 0.35 * fleck), late_c.xyz, 0.18 * halo);
     let heart = late_c.xyz * mix(streak_c.xyz, vec3<f32>(1.0), 0.45) * (0.95 - 0.55 * late_c.y);
     let flecked1 = mix(flecked0, heart, knot * (0.7 + 0.3 * knot_ring));
-    let flecked = mix(flecked1, heart * 0.35, max(0.8 * check, 0.9 * bark));
+    let flecked = mix(flecked1, heart * 0.45, max(0.6 * check, 0.9 * bark));
     let c = clamp(flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mix(vec3<f32>(1.0), vec3<f32>(0.80, 0.72, 0.62), end), vec3<f32>(0.0), vec3<f32>(1.0));
     let roughness = clamp(mix(k.z, k.w, late / max(contrast, 1e-3)) + 0.08 * pore, 0.02, 1.0);
     return vec4<f32>(c, roughness);
