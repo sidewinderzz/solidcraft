@@ -57,6 +57,10 @@ pub struct WoodLook {
     pub knots: f32,
     /// Burl, 0…1 (0: none): the grain swirls in every direction around small eyes.
     pub burl: f32,
+    /// How this species knots, 0…1 (only where `knots` asks for any): toward 1 its branches are
+    /// smaller and it carries more pin knots, small dark dots in loose groups (cherry, birch,
+    /// maple); toward 0 it has few, larger knots (walnut, teak).
+    pub pins: f32,
 }
 
 /// A species: a stable id (the starter preset id without `starter.wood.`) and its look.
@@ -102,8 +106,14 @@ const fn species(
             variation: 1.0,
             knots: 0.0,
             burl: 0.0,
+            pins: 0.3,
         },
     }
+}
+
+/// A species with its own way of knotting ([`WoodLook::pins`]).
+const fn pins(s: Species, pins: f32) -> Species {
+    Species { id: s.id, look: WoodLook { pins, ..s.look } }
 }
 
 /// A species as raw, unfinished timber: greyer, paler, flatter and matt (what an oil or a
@@ -139,29 +149,29 @@ const fn plywood(id: &'static str, veneer: &Species, ply_mm: f32) -> Species {
 }
 
 const OAK_HONEY: Species =
-    species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]);
+    pins(species("oak-honey", rgb(196, 148, 88), rgb(144, 96, 50), rgb(124, 84, 46), rgb(222, 180, 118), 3.0, 0.7, 2.5, 0.8, 0.3, [0.34, 0.44]), 0.5);
 const OAK_SMOKED: Species =
-    species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]);
+    pins(species("oak-smoked", rgb(106, 84, 64), rgb(60, 44, 32), rgb(46, 34, 26), rgb(132, 106, 82), 3.0, 0.7, 2.5, 0.8, 0.3, [0.36, 0.46]), 0.5);
 // Walnut with a clear finish: warm chocolate heartwood, amber zones, near-black streaks, open
 // pores (no sapwood band).
 const WALNUT: Species =
-    species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(56, 36, 27), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.45, [0.30, 0.38]);
+    pins(species("walnut-dark", rgb(112, 70, 44), rgb(70, 43, 29), rgb(56, 36, 27), rgb(142, 92, 56), 4.0, 0.55, 4.5, 0.6, 0.45, [0.30, 0.38]), 0.15);
 // Raw walnut is its own colours: a cool grey-brown with a faint purple cast.
 const WALNUT_RAW: Species =
-    species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.35, [0.80, 0.88]);
+    pins(species("walnut-dark-raw", rgb(146, 121, 104), rgb(112, 90, 77), rgb(92, 74, 68), rgb(170, 146, 122), 4.0, 0.4, 4.5, 0.6, 0.35, [0.80, 0.88]), 0.15);
 const MAPLE: Species =
-    species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]);
+    pins(species("maple-light", rgb(228, 200, 150), rgb(202, 166, 112), rgb(186, 148, 100), rgb(242, 220, 176), 3.5, 0.3, 2.0, 0.1, 0.2, [0.30, 0.38]), 0.6);
 const CHERRY: Species =
-    species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]);
+    pins(species("cherry-warm", rgb(176, 104, 66), rgb(136, 74, 44), rgb(110, 58, 36), rgb(202, 134, 88), 3.0, 0.4, 2.5, 0.2, 0.35, [0.30, 0.38]), 0.7);
 const ASH: Species =
-    species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]);
+    pins(species("ash-pale", rgb(218, 194, 152), rgb(160, 124, 80), rgb(146, 114, 76), rgb(236, 216, 178), 3.5, 0.75, 2.5, 0.75, 0.2, [0.36, 0.46]), 0.2);
 const BIRCH: Species =
-    species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]);
+    pins(species("birch-cream", rgb(230, 208, 164), rgb(208, 178, 130), rgb(192, 162, 116), rgb(244, 228, 190), 3.0, 0.3, 2.0, 0.1, 0.2, [0.32, 0.40]), 0.7);
 // Birch plywood of the all-birch, void-free kind: 1.4 mm plies (13 in an 18 mm sheet).
 const BIRCH_PLY: Species = plywood("birch-plywood", &BIRCH, 1.4);
 const BIRCH_PLY_RAW: Species = plywood("birch-plywood-raw", &raw("birch-cream-raw", &BIRCH), 1.4);
 const TEAK: Species =
-    species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]);
+    pins(species("teak-golden", rgb(174, 124, 64), rgb(124, 84, 40), rgb(88, 60, 32), rgb(204, 158, 90), 4.5, 0.5, 3.0, 0.45, 0.5, [0.34, 0.42]), 0.1);
 
 /// The starter species, in the starter pack's order: each with a clear finish (`oak-honey`) and
 /// as raw timber (`oak-honey-raw`).
@@ -265,7 +275,7 @@ impl WoodShade {
             r2,
             [l.stock[0], l.stock[1], l.stock[2], 0.0],
             // Kept for the rings' variation, knots and burl.
-            [l.variation, l.knots, l.burl, 0.0],
+            [l.variation, l.knots, l.burl, l.pins],
             [l.ply[0], l.ply[1], l.ply[2], 0.0],
         ]
     }
@@ -446,6 +456,8 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
     let mut kd = 0.0;
     let mut kring = 0.0;
     let mut halo = 0.0;
+    let mut check = 0.0;
+    let mut bark = 0.0;
     if l.knots > 0.0 {
         let cell = (g[0] / 300.0).floor();
         let ci = cell as i32;
@@ -464,24 +476,60 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
             let lean = 0.25 + 0.4 * h5;
             let reach = out.max(0.0);
             let u = g[0] - (cell + 0.2 + 0.25 * h1) * 300.0 - lean * 160.0 * reach / (reach + 160.0);
-            let rk = (4.0 + 10.0 * h4) * (0.45 + 0.55 * smoothstep(0.0, 120.0, out));
+            let rk = (5.0 + 11.0 * h4) * (1.0 - 0.45 * l.pins) * (0.45 + 0.55 * smoothstep(0.0, 120.0, out));
             // Only where the branch is, and nothing of it reaches the next 300 mm.
             let there = smoothstep(0.0, 8.0, out) * (1.0 - smoothstep(30.0, 60.0, u.abs()));
             // Across the leaning branch.
             let d = (u * u / (1.0 + lean * lean) + side * side).sqrt();
             let wob = noise([1.6 * u / (d + 1.0e-3) + 40.0 * h1, 1.6 * side / (d + 1.0e-3) + 40.0 * h2, out * 0.03], s ^ 0x4cf5_ad43) - 0.5;
             kd = d / rk * (1.0 + 0.35 * wob);
-            kring = kd * (3.0 + 4.0 * h3) + 1.5 * (noise([u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03], s ^ 0x2f0b_3c61) - 0.5);
+            kring = kd * (5.0 + 5.0 * h3) + 1.5 * (noise([u / rk * 1.3 + 9.0, side / rk * 1.3 + 4.0, out * 0.03], s ^ 0x2f0b_3c61) - 0.5);
             knot = there * (1.0 - smoothstep(0.88, 1.04, kd));
             // The trunk's fibres part around the branch: farther along the grain than across.
             let wide = 1.7 * rk;
             let part = -there * side * wide * wide / (u * u * 0.16 + side * side + wide * wide);
-            let far = (u * u * 0.09 + side * side).sqrt() / rk;
-            // The tent's foot is a pointed lens, long along the grain.
-            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (10.0 * rk * rk);
-            lift = there * 2.2 * rk / (1.0 + 0.8 * lens * lens);
+            let far = (u * u * if u < 0.0 { 0.04 } else { 0.12 } + side * side).sqrt() / rk;
+            // The tent's foot is a pointed lens, long along the grain and longest down the
+            // trunk, where the grain closes again slowly (a comet's tail).
+            let tail = if u < 0.0 { 26.0 } else { 9.0 };
+            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (tail * rk * rk);
+            // Drying cracks from the knot's heart, and bark grown in along part of its rim.
+            let spoke = noise([5.0 * u / (d + 1.0e-3) + 23.0 * h2, 5.0 * side / (d + 1.0e-3) + 23.0 * h4, 7.0 * h1], s ^ 0x61c8_8647);
+            check = there * smoothstep(0.78, 0.9, spoke) * smoothstep(0.05, 0.25, kd) * (1.0 - smoothstep(0.55, 0.95, kd));
+            let arc = 2.0 * h5 - 1.0;
+            bark = there * smoothstep(-0.3, 0.5, (u * arc + side * (1.0 - arc * arc).max(0.0).sqrt()) / (d + 1.0e-3)) * smoothstep(0.8, 0.95, kd) * (1.0 - smoothstep(1.02, 1.14, kd));
+            lift = there * rk * (1.6 / (1.0 + 0.5 * lens * lens) + 3.4 / (1.0 + 0.6 * lens * lens * lens * lens));
             halo = there / (1.0 + 0.5 * far * far * far * far);
             g = [g[0], g[1] - part * az, g[2] + part * ay];
+        }
+    }
+    // Pin knots: small shoots that start somewhere out in the trunk, in loose groups.
+    if l.knots > 0.0 && l.pins > 0.0 {
+        let cell = (g[0] / 80.0).floor();
+        let ci = cell as i32;
+        if hash(ci, 1, 13, s ^ 0x7f4a_7c15) < l.knots * l.pins {
+            let h1 = hash(ci, 2, 13, s ^ 0x7f4a_7c15);
+            let h2 = hash(ci, 3, 13, s ^ 0x7f4a_7c15);
+            let h3 = hash(ci, 4, 13, s ^ 0x7f4a_7c15);
+            let h4 = hash(ci, 5, 13, s ^ 0x7f4a_7c15);
+            let ay = 2.0 * h2 - 1.0;
+            let az = if h3 < 0.5 { -1.0 } else { 1.0 } * (1.0 - ay * ay).max(0.0).sqrt();
+            let out = g[1] * ay + g[2] * az;
+            let side = g[2] * ay - g[1] * az;
+            let u = g[0] - (cell + 0.35 + 0.3 * h1) * 80.0;
+            let rk = 1.0 + 2.2 * h4;
+            let start = 150.0 * hash(ci, 6, 13, s ^ 0x7f4a_7c15);
+            let there = smoothstep(start, start + 10.0, out) * (1.0 - smoothstep(12.0, 24.0, u.abs()));
+            let pd = (u * u + side * side).sqrt() / rk;
+            let lens = (side * side / (rk * rk) + 0.1).sqrt() + u * u / (12.0 * rk * rk);
+            lift += there * 2.5 * rk / (1.0 + 0.8 * lens * lens);
+            halo = halo.max(there / (1.0 + 0.3 * pd * pd * pd * pd));
+            let pin = there * (1.0 - smoothstep(0.75, 1.05, pd));
+            if pin > knot {
+                knot = pin;
+                kd = pd;
+                kring = pd * 2.0;
+            }
         }
     }
     // Burl: the grain swirls the same in every direction (two sizes of swirl), around eyes:
@@ -606,7 +654,10 @@ pub fn sample(l: &WoodLook, g: [f32; 3], fx: [f32; 3], fy: [f32; 3]) -> WoodSamp
         // A knot is dense, dark wood with rings of its own, darkest at its rim and its heart,
         // and the wood packed around it is a little darker too.
         let flecked = mixf(flecked, l.late[k], 0.3 * halo);
-        let flecked = mixf(flecked, l.late[k] * mixf(l.streak[k], 1.0, 0.45), knot * (0.7 + 0.3 * knot_ring));
+        // (Darker than the timber even in a pale wood.)
+        let heart = l.late[k] * mixf(l.streak[k], 1.0, 0.45) * (0.95 - 0.55 * l.late[1]);
+        let flecked = mixf(flecked, heart, knot * (0.7 + 0.3 * knot_ring));
+        let flecked = mixf(flecked, heart * 0.35, (0.8 * check).max(0.9 * bark));
         *ck =
             (flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple * tone * (1.0 - seam) * mixf(1.0, END_GRAIN[k], end)).clamp(0.0, 1.0);
     }
