@@ -118,6 +118,8 @@ pub fn comparable(v: &semver::Version) -> semver::Version {
 /// a string that is not a version, the release history.
 pub fn release_notes_url(version: &str, release_build: bool) -> String {
     const HISTORY: &str = "https://github.com/sidewinderzz/solidcraft/releases";
+    // Fork builds are labelled `<version>+fork`; their release tag is `v<version>`.
+    let version = version.split('+').next().unwrap_or(version);
     if release_build && parse_version(version).is_some() && version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
         format!("{HISTORY}/tag/v{version}")
     } else {
