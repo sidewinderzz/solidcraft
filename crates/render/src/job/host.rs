@@ -3042,6 +3042,7 @@ mod retained_request_tests {
                 opacity: 1.0,
                 surface: None,
                 faces: Vec::new(),
+                wood: None,
             }],
             bounds,
         };
@@ -3098,6 +3099,7 @@ mod retained_request_tests {
                 transmission: None,
                 surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(surface, 0.0, 1.0, 1.0).unwrap()),
                 faces: vec![],
+                wood: None,
             }],
         };
         let options = super::super::RaytraceOptions {
@@ -3396,6 +3398,7 @@ mod surface_request_metadata_tests {
                 opacity: 1.0,
                 surface: None,
                 faces: Vec::new(),
+                wood: None,
             });
             effects.push(SurfaceEffect {
                 body: name,

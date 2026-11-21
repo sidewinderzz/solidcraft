@@ -757,7 +757,8 @@ fn look(body: &crate::ProductMesh, look: Option<&FaceAppearance>, paint: bool, [
     if opacity <= 0.0 {
         return Ok(None);
     }
-    Ok(Some(Look { colour, opacity, surface, paint, normals }))
+    let wood = look.map_or(body.wood, |look| look.wood.as_deref().copied());
+    Ok(Some(Look { colour, opacity, surface, paint, normals, wood }))
 }
 
 /// The same clipping, supersampling and bounds govern admission and raster work.
@@ -819,6 +820,7 @@ struct Triangle {
     surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     /// Off for a depth-only body.
     paint: bool,
+    wood: Option<solidcraft_viewport::wood::WoodShade>,
     area: f64,
     /// Whole-canvas sample bounds `[x0, x1, y0, y1]` (inclusive), narrowed to the tile drawn.
     bounds: [usize; 4],
@@ -831,10 +833,10 @@ struct Triangle {
 impl Triangle {
     /// Its cursor at the first row of its bounds.
     fn new(world: [Vec3; 3], look: Look, placed: Placed) -> Self {
-        let Look { colour, opacity, surface, paint, normals } = look;
+        let Look { colour, opacity, surface, paint, normals, wood } = look;
         let Placed { points, inv_w, area, bounds } = placed;
         let mut triangle =
-            Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, area, bounds, x: 0, y: 0, end: 0 };
+            Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, wood, area, bounds, x: 0, y: 0, end: 0 };
         triangle.start_row(bounds[2]);
         triangle
     }
@@ -853,6 +855,8 @@ struct Look {
     surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     paint: bool,
     normals: [Vec3; 3],
+    /// Procedural wood over the colour (and the finish's roughness), if any.
+    wood: Option<solidcraft_viewport::wood::WoodShade>,
 }
 
 /// Where a triangle lands on the whole canvas.
@@ -1418,20 +1422,29 @@ fn raster_pixel(
         return Ok(());
     }
     let n = t.normals.iter().zip(weights).fold(Vec3::ZERO, |v, (n, w)| v + *n * (w / sum)).normalized().unwrap_or(Vec3::Z);
-    let colour = if let Some(surface) = t.surface {
-        let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
+    let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
+    // Wood: its colour and roughness at this point.
+    let surface = match (t.wood.as_ref(), t.surface) {
+        (Some(wood), Some(surface)) => Some(crate::product::wooded_surface(wood, surface, world)),
+        (_, surface) => surface,
+    };
+    let plain = match t.wood.as_ref() {
+        Some(wood) => wood.sample(world).srgb.map(|v| decode((v.clamp(0.0, 1.0) * 255.0).round() as u8)),
+        None => t.colour,
+    };
+    let colour = if let Some(surface) = surface {
         let to_eye = view.eye.map_or(view.back, |eye| eye - world);
         let radiance = crate::studio::shade_weighted(surface, n, to_eye, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
-        let [r, g, b] = t.colour;
+        let [r, g, b] = plain;
         let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, view.back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        solidcraft_viewport::shade(n, view.back, t.colour)
+        solidcraft_viewport::shade(n, view.back, plain)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

@@ -93,7 +93,8 @@ fn palette_entry(i: u32) -> vec2<u32> {
 /// past the material texture has none (a load out of range is not defined).
 fn finish_h(i: u32, hatch: u32) -> u32 {
     let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
-    if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
+    // An entry with wood (`hatch` holds its record above bit 8) keeps it and takes no finish.
+    if ((hatch >> 8u) != 0u || at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
     let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
     let q = vec2<u32>(round(p * 255.0));
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
@@ -410,9 +411,10 @@ fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
 /// The cut face in its body's colour ("from component" colouring), tinted toward the cap colour
 /// so it reads as a cut, hatched at the angle of the plane it lies on; by part, toward the body's
 /// own hatch colour, a turned part's stripes a quarter turn round. With the hatch off (`u.cap.a`
-/// 0), plain in the body's own colour.
-fn cap_color(i: TOut) -> vec4<f32> {
-    if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
+/// 0), plain in the body's own colour. `wood` is the fragment's colour with its wood grain
+/// (`wooded`), which the caller takes before any branch (derivatives).
+fn cap_color(i: TOut, wood: vec4<f32>) -> vec4<f32> {
+    if (u.cap.a < 0.5) { return out_color(vec4<f32>(wood.rgb, 1.0)); }
     var tint = u.cap.rgb;
     var s = u.plane_hatch[min(kept_span(i.wp).k, 5u)].xy;
     if ((i.h & 255u) > 0u) {
@@ -420,7 +422,7 @@ fn cap_color(i: TOut) -> vec4<f32> {
         tint = u.hatch[min(k >> 1u, 2u)].rgb;
         if ((k & 1u) == 1u) { s = vec2<f32>(-s.y, s.x); }
     }
-    let base = mix(i.c.rgb, tint, 0.35);
+    let base = mix(wood.rgb, tint, 0.35);
     let h = fract(dot(i.pos.xy, s));
     return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
 }
@@ -446,15 +448,17 @@ fn fs_section_count_flat(i: FOut) -> @location(0) vec4<f32> {
 /// wall.
 @fragment
 fn fs_section_fill(i: TOut) -> @location(0) vec4<f32> {
+    let w = wooded(i);
     if (!past_entry(kept_span(i.wp))) { discard; }
-    return cap_color(i);
+    return cap_color(i, w);
 }
 
 @fragment
 fn fs_section_fill_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let t = flat_fragment(i, front);
+    let w = wooded(t);
     if (!past_entry(kept_span(t.wp))) { discard; }
-    return cap_color(t);
+    return cap_color(t, w);
 }
 
 fn solid(i: TOut, front: bool) -> vec4<f32> {
@@ -463,8 +467,9 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let k = curvature(i);
     let ndv = dot(normalize(i.n), normalize(u.back.xyz));
     let fw = fwidth(ndv);
+    let w = wooded(i);
     if (clipped(i.wp)) { discard; }
-    if (!front && sectioned()) { return cap_color(i); }
+    if (!front && sectioned()) { return cap_color(i, w); }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
     }
@@ -753,30 +758,39 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
-fn hover_color(i: TOut) -> vec4<f32> {
+/// A hovered body or face in a lifted colour; `wood` is its colour with its wood grain
+/// (`wooded`), taken by the caller before any branch (derivatives).
+fn hover_color(i: TOut, wood: vec4<f32>) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
+    // An opaque body keeps its finish under the hover; a faded, see-through or wooden one
+    // stays plain (a wooden body keeps its grain).
+    return lit_color(i, 1.0, vec4<f32>(wood.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99 && wood_slot(i.h) == 0u);
 }
 
 /// A hovered body or face, lit over the model in a lifted colour.
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
-    return hover_color(i);
+    let w = wooded(i);
+    return hover_color(i, w);
 }
 
 @fragment
 fn fs_hl_hover_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let t = flat_fragment(i, front);
-    return hover_color(t);
+    let w = wooded(t);
+    return hover_color(t, w);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
+    let w = wooded(i);
     if (clipped(i.wp)) { discard; }
-    // The selection colour stays flat and plain, so it reads the same on every finish.
-    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
+    // The selection colour stays flat and plain, so it reads the same on every finish; a
+    // wooden body keeps its grain under it.
+    var base = u.sel.rgb;
+    if (wood_slot(i.h) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.4); }
+    return lit_color(i, 1.0, vec4<f32>(base, i.c.a), false);
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
@@ -822,7 +836,36 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
 
 /// An opaque face, with its material finish where the viewport shows them.
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
-    return lit_color(i, visibility, i.c, true);
+    // A wooden face keeps its grain under the plain lighting: the finish is for plain colours.
+    return lit_color(i, visibility, wooded(i), wood_slot(i.h) == 0u);
+}
+
+/// A wood record's `k`th `vec4` (`solidcraft_viewport::wood::TEXELS`): two palette texels of
+/// `f32` bits from entry `slot` on.
+fn wood_texel(slot: u32, k: u32) -> vec4<f32> {
+    let a = palette_entry(slot + 2u * k);
+    let b = palette_entry(slot + 2u * k + 1u);
+    return vec4<f32>(bitcast<f32>(a.x), bitcast<f32>(a.y), bitcast<f32>(b.x), bitcast<f32>(b.y));
+}
+
+/// The fragment's colour: its body's, or its wood's at this point (the palette entry's upper
+/// bits name the body's wood record, 0: none).
+fn wooded(i: TOut) -> vec4<f32> {
+    let slot = wood_slot(i.h);
+    // The pixel's steps on the surface, mm (taken before the branch: derivatives need uniform
+    // control flow).
+    let dx = dpdx(i.wp);
+    let dy = dpdy(i.wp);
+    if (slot == 0u) { return i.c; }
+    let w = wood_sample(slot, wood_grain(slot, i.wp), wood_step(slot, dx), wood_step(slot, dy));
+    return vec4<f32>(w.rgb, i.c.a);
+}
+
+/// The wood record a fragment's `h` names (`Palette::set_wood`), 0: none. Wood records sit
+/// below palette entry 2^16, so bit 24 is clear; with bit 24 set, the bits above the hatch are
+/// a PBR finish instead (`finish_h`).
+fn wood_slot(h: u32) -> u32 {
+    return select(0u, h >> 8u, (h >> 24u) == 0u);
 }
 
 /// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).

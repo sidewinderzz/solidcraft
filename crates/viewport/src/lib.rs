@@ -21,6 +21,7 @@ mod scene;
 pub mod surface;
 pub mod vec;
 mod view_spec;
+pub mod wood;
 
 pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};

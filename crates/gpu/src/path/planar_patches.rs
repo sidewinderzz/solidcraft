@@ -217,6 +217,7 @@ mod tests {
                 surface: None,
                 transmission: None,
                 faces: vec![],
+                wood: None,
             }],
         };
         let upload = super::super::flatten(&scene, Vec3::ZERO, &CancelToken::default()).unwrap();

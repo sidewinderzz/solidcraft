@@ -213,3 +213,55 @@ pub(super) fn packed_bytes(resources: &RuntimeTextures, body_count: usize) -> u6
     }
     bytes
 }
+
+/// Does any body (or face) of `scene` have procedural wood grain?
+pub(super) fn has_wood(scene: &solidcraft_render::ProductScene) -> bool {
+    scene.meshes.iter().any(|m| m.wood.is_some())
+}
+
+const WOOD_WORDS: usize = solidcraft_viewport::wood::TEXELS * 4;
+
+/// The words [`append_wood`] adds: a table entry per body and a record per wooden body.
+pub(super) fn wood_bytes(scene: &solidcraft_render::ProductScene) -> u64 {
+    if !has_wood(scene) {
+        return 0;
+    }
+    let records = scene.meshes.iter().filter(|m| m.wood.is_some()).count();
+    4 * ((scene.meshes.len() + 1).next_multiple_of(4) + records * WOOD_WORDS) as u64
+}
+
+/// Append the bodies' wood records to the texture words: word 2 is the table's first word,
+/// word 3 how many body ids it has (body index + 1, as `texture_record` counts them), and each
+/// table entry the record's first word (0: no wood). A record is the shade's
+/// [`solidcraft_viewport::wood::TEXELS`] `vec4`s, its grain map taken to the shader's
+/// coordinates (relative to `origin`, the camera target). Only bodies' own wood: a face with a
+/// look of its own keeps that look's plain colour here.
+pub(super) fn append_wood(bytes: &mut Vec<u8>, scene: &solidcraft_render::ProductScene, origin: Vec3) -> Result<()> {
+    if !has_wood(scene) {
+        return Ok(());
+    }
+    if bytes.len() < 16 {
+        bytes.resize(16, 0);
+    }
+    let table = bytes.len() / 4;
+    let ids = scene.meshes.len() + 1;
+    let words = |n: usize| u32::try_from(n).map_err(|_| JobError::new(ErrorCode::LimitExceeded, "wood record offset overflow"));
+    write_word(bytes, 2, words(table)?)?;
+    write_word(bytes, 3, words(ids)?)?;
+    bytes.resize((table + ids.next_multiple_of(4)) * 4, 0);
+    for (index, mesh) in scene.meshes.iter().enumerate() {
+        let Some(wood) = &mesh.wood else { continue };
+        let record = bytes.len() / 4;
+        write_word(bytes, table + index + 1, words(record)?)?;
+        // The shader's points are relative to `origin`: grain = R (p + origin) + t.
+        let mut shade = *wood;
+        for row in &mut shade.to_grain {
+            let shift = f64::from(row[0]) * origin.x + f64::from(row[1]) * origin.y + f64::from(row[2]) * origin.z;
+            row[3] = (f64::from(row[3]) + shift) as f32;
+        }
+        for v in shade.texels().iter().flatten() {
+            bytes.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+    }
+    Ok(())
+}
