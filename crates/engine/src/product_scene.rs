@@ -42,6 +42,7 @@ pub fn extract_where(s: &Session, keep: impl Fn(&ModelBody) -> bool) -> Result<P
                     opacity: look.opacity.clamp(0.0, 1.0),
                     surface: look.opaque_surface().map_err(|e| EngineError::Other(e.to_string()))?,
                     transmission: None,
+                    wood: s.doc.look_wood(body, &look).map(Box::new),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -55,6 +56,7 @@ pub fn extract_where(s: &Session, keep: impl Fn(&ModelBody) -> bool) -> Result<P
             surface,
             transmission: None,
             faces,
+            wood: s.doc.model_body_wood(body),
         });
     }
     Ok(scene)

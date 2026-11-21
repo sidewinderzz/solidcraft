@@ -154,6 +154,7 @@ fn completed_raytrace_task_releases_captured_mesh_before_returning_png() {
             opacity: 1.0,
             surface: None,
             faces: Vec::new(),
+            wood: None,
         }],
         bounds: Aabb3::EMPTY,
     };

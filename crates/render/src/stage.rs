@@ -120,6 +120,7 @@ impl StagePanel {
             surface: Some(surface),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         })
     }
 }

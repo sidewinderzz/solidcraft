@@ -466,6 +466,8 @@ pub struct ViewportState {
     pub(crate) joint_handles: Option<crate::joint_handles::Mode>,
     /// A free part being dragged to a new place (#2804).
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
+    /// A wood's grain being dragged through its body (Appearance's Move grain).
+    pub(crate) grain_drag: Option<crate::grain_drag::Drag>,
     /// Extrude by pulling a face or profile.
     pub(crate) drag_extrude: crate::drag_extrude::State,
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
@@ -1964,6 +1966,42 @@ fn push_block(
 }
 
 /// Write a body's colour into the stable arena and into the scene palette being built from it.
+/// Procedural wood grain on a body's palette entries: its body and instance entries and the
+/// faces without looks of their own take its own look's grain; a face whose own look has grain
+/// takes that. The records go into the scene's palette only (they are rebuilt with the scene,
+/// so a changed body gets its grain frame worked out again).
+fn body_wood(
+    doc: &solidcraft_engine::doc::Document,
+    b: &solidcraft_engine::doc::ModelBody,
+    palette: &mut std::sync::Arc<crate::gpu::Palette>,
+    slots: &crate::scene_palette::BodySlots,
+    face_looks: &std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
+) {
+    let own = doc.model_body_wood(b);
+    let has_face_grain = face_looks.values().any(|l| l.grain.is_some());
+    if own.is_none() && !has_face_grain {
+        return;
+    }
+    let palette = std::sync::Arc::make_mut(palette);
+    if let Some(shade) = own
+        && let Some(record) = palette.add_wood(&shade)
+    {
+        palette.set_wood(slots.body, Some(record));
+        palette.set_wood(slots.instance, Some(record));
+        for f in (0..b.body.face_count()).filter(|f| !face_looks.contains_key(f)) {
+            palette.set_wood(slots.face(f), Some(record));
+        }
+    }
+    let mut made: Vec<(&solidcraft_engine::doc::appearance::Look, crate::gpu::PaletteIndex)> = Vec::new();
+    for (f, look) in face_looks.iter().filter(|(_, l)| l.grain.is_some()) {
+        let record = match made.iter().find(|(l, _)| *l == look) {
+            Some((_, r)) => Some(*r),
+            None => doc.look_wood(b, look).and_then(|shade| palette.add_wood(&shade)).inspect(|r| made.push((look, *r))),
+        };
+        palette.set_wood(slots.face(*f), record);
+    }
+}
+
 fn set_palette_color(
     arena: &mut crate::scene_palette::PaletteArena,
     palette: &mut std::sync::Arc<crate::gpu::Palette>,
@@ -2778,6 +2816,9 @@ fn body_scene(
                 made
             }
         };
+        if !faded && s.colored_components.is_none() {
+            body_wood(&s.doc, b, &mut sc.palette, &slots, face_looks);
+        }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
         // The plan is built only for a body with a class.
@@ -6233,6 +6274,12 @@ impl<'a> BodiesByName<'a> {
     }
 }
 
+/// Does `b`'s own look have wood grain? Its hovered faces are then outlined rather than filled,
+/// so the grain stays visible under the pointer.
+fn wooden(doc: &solidcraft_engine::doc::Document, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    doc.model_body_look(b).is_some_and(|look| look.grain.is_some())
+}
+
 /// How a whole body is lit: hovered or selected, and in which colour (where the model's own
 /// colour is not kept: placements, and faded or see-through bodies).
 #[derive(Clone, Copy)]
@@ -6679,6 +6726,13 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 {
                     if moved && has_pickable_outline(&shown(b)) {
                         moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY, app.preferences.show_selected_hidden_edges);
+                    } else if matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Appearance(_))) {
+                        // The Appearance dialog's picked bodies show the look they wear, not the
+                        // selection colour: they are outlined.
+                        let m = shown(b);
+                        for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
+                            edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                        }
                     } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
@@ -6882,7 +6936,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                     let f = f as usize;
                     hovered_faces.contains(&f) && selected_faces.is_none_or(|s| !s.contains(&f))
                 };
-                mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                // A wooden body keeps its grain under the pointer: its faces are outlined, not
+                // filled with one flat colour.
+                if !wooden(&s.doc, b) {
+                    mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                }
             }
         }
         // A whole body's edges: the model's own lines, drawn again (see `highlight_edges`).
@@ -6932,7 +6990,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // An imported mesh has one display face. Tint its existing instance using the
                 // face's palette slot so hovering can reuse its triangles.
                 let own = highlight_opaque(app, b, &active_bodies).then(|| body_slots.slots(&b.name)).flatten();
-                let draw_fill = !(outlines && has_pickable_outline(&m));
+                let draw_fill = !(outlines && has_pickable_outline(&m)) && !wooden(&s.doc, b);
                 let reused = draw_fill
                     && *index == 0
                     && !selected
@@ -8125,6 +8183,28 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::sketch_text_handles::dragging(app) && !crate::ui_kit::input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
+    // Appearance's Move grain: a drag on a wooden body slides its grain through it.
+    if crate::grain_drag::armed(app) && primary_nav.is_none() && mode.is_none() && !held {
+        if resp.drag_started_by(egui::PointerButton::Primary)
+            && !(mods.shift || mods.command || mods.ctrl || mods.alt)
+            && let Some(a) = ui.input(|i| i.pointer.press_origin())
+            && rect.contains(a)
+            && !crate::shell::covered(app, a)
+            && !axes.contains(a)
+        {
+            crate::grain_drag::start(app, &proj, a);
+        }
+        if crate::grain_drag::active(app)
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            crate::grain_drag::to(app, &proj, p);
+        }
+    }
+    if crate::grain_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
+        crate::grain_drag::end(app);
+    }
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
@@ -8190,6 +8270,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::joint_handles::active(app)
         && !joint_handle_pointer
         && !crate::occurrence_drag::active(app)
+        && !crate::grain_drag::active(app)
+        && !crate::grain_drag::armed(app)
         && !crate::drag_extrude::started(app)
         && !crate::dim_view::dragging()
         && !crate::sketch3d::dragging()

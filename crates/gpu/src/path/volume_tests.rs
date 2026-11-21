@@ -227,6 +227,7 @@ fn optical_line_fixture(case: OpticalLineCase) -> (ProductScene, ImageRequest, J
                 surface: Some(OpaqueSurface::new(Vec3::new(0.5, 0.25, 0.125), 0.0, 0.5, 1.0).unwrap()),
                 transmission: None,
                 faces: Vec::new(),
+                wood: None,
             });
             lighting.directional_lights =
                 DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: std::f64::consts::PI }])

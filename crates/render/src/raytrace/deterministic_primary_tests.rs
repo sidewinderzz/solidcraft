@@ -35,6 +35,7 @@ fn scene(face_override: bool) -> ProductScene {
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap()),
             faces: Vec::new(),
+            wood: None,
         });
     }
     if face_override {
@@ -44,6 +45,7 @@ fn scene(face_override: bool) -> ProductScene {
             color: [0; 3],
             opacity: 1.0,
             surface: Some(OpaqueSurface::new(Vec3::ZERO, 1.0, 1.0, 1.5).unwrap()),
+            wood: None,
         });
     }
     let bounds = meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds()));

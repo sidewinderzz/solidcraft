@@ -28,6 +28,7 @@ fn seam_tetra(offset: Vec3) -> ProductScene {
             surface: Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.1, 1.5).unwrap()),
             transmission: Some(Transmission::new(Vec3::ZERO, None).unwrap()),
             faces: Vec::new(),
+            wood: None,
         }],
         bounds,
     }
