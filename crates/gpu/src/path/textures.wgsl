@@ -257,3 +257,18 @@ fn texture_mip_reference() {
     let footprint=texture_filter(vec2<u32>(texture_words[record+7u],texture_words[record+11u]),gradients,last);
     accumulation[1]=vec4<f32>(footprint.lod,0.0,0.0,1.0);
 }
+
+// Procedural wood grain (`textures::append_wood`): a body's record, or 0. A face with a look of
+// its own (`interior.z` bit 2) keeps that look.
+fn wood_record(body_id:f32, face_override:bool)->u32 {
+    if !HAS_TEXTURES || face_override {return 0u;}
+    let table=texture_words[2];
+    if table==0u {return 0u;}
+    let body=u32(body_id);
+    if body>=texture_words[3] {return 0u;}
+    return texture_words[table+body];
+}
+fn wood_texel(slot:u32,k:u32)->vec4<f32> {
+    let w=slot+4u*k;
+    return bitcast<vec4<f32>>(vec4<u32>(texture_words[w],texture_words[w+1u],texture_words[w+2u],texture_words[w+3u]));
+}

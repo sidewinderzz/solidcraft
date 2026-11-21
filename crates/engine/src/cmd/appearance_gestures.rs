@@ -1,14 +1,22 @@
 //! Assignment tools share the existing look parser, chain and atomic assignment command.
-use crate::{Result, Session, params::bad};
+use crate::{
+    Result, Session,
+    params::bad,
+    schema::appearance::{AppearanceCopyResult, AppearancePaintResult, AppearancePickUpResult, LookReply},
+};
 use serde_json::{Value, json};
 use solidcraft_doc::appearance::Look;
 
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub(in crate::cmd) fn paint(_s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("done").and_then(Value::as_bool) == Some(true) {
-        return Ok(json!({"done":true}));
+        return reply("appearance.paint", AppearancePaintResult { done: Some(true), look: None, param_warnings: Vec::new() });
     }
     let look = super::appearance_look("appearance.paint", p)?.ok_or_else(|| bad("appearance.paint", "choose a look first"))?;
-    Ok(json!({"look": super::look_json(&look)}))
+    reply("appearance.paint", AppearancePaintResult { done: None, look: Some(LookReply::from(&look)), param_warnings: Vec::new() })
 }
 
 fn resolved(s: &mut Session, p: &Value) -> Result<Look> {
@@ -35,21 +43,22 @@ fn resolved(s: &mut Session, p: &Value) -> Result<Look> {
     let fallback = crate::view::colors::BODY;
     let color =
         s.doc.body_color(body).map(|rgb| rgb.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).unwrap_or([fallback.0, fallback.1, fallback.2]);
-    Ok(Look { name: "Default".into(), color, opacity: 1.0, pbr: None })
+    Ok(Look { name: "Default".into(), color, opacity: 1.0, pbr: None, grain: None })
 }
 
 pub(in crate::cmd) fn pick_up(s: &mut Session, p: &Value) -> Result<Value> {
     if p.as_object().is_some_and(|p| p.is_empty()) {
-        return Ok(json!({"tool":"pick_up"}));
+        return reply("appearance.pick_up", AppearancePickUpResult { tool: Some("pick_up"), look: None, param_warnings: Vec::new() });
     }
-    Ok(json!({"look":super::look_json(&resolved(s, p)?)}))
+    let look = resolved(s, p)?;
+    reply("appearance.pick_up", AppearancePickUpResult { tool: None, look: Some(LookReply::from(&look)), param_warnings: Vec::new() })
 }
 
 pub(in crate::cmd) fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let look = resolved(s, p)?;
-    let reply = json!({"look":super::look_json(&look)});
+    let copied = AppearanceCopyResult { look: LookReply::from(&look), param_warnings: Vec::new() };
     s.appearance_clipboard = Some(look);
-    Ok(reply)
+    reply("appearance.copy", copied)
 }
 
 pub(in crate::cmd) fn favorite(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -67,7 +76,7 @@ pub(in crate::cmd) fn favorite(_s: &mut Session, p: &Value) -> Result<Value> {
 pub(in crate::cmd) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let look = s.appearance_clipboard.as_ref().ok_or_else(|| bad("appearance.paste", "copy a look first"))?;
     let mut params = p.as_object().cloned().ok_or_else(|| bad("appearance.paste", "give assignment targets"))?;
-    for key in ["appearance", "name", "color", "opacity", "pbr"] {
+    for key in ["appearance", "name", "color", "opacity", "pbr", "grain"] {
         params.remove(key);
     }
     for (key, value) in super::look_json(look).as_object().into_iter().flatten() {

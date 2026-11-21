@@ -27,6 +27,7 @@ fn scene() -> Result<ProductScene, Box<dyn Error>> {
             surface: Some(OpaqueSurface::new(Vec3::new(0.1, 0.3, 0.6), 0.0, 0.5, 1.5)?),
             transmission: None,
             faces: Vec::new(),
+            wood: None,
         }],
     })
 }
