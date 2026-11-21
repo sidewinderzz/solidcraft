@@ -34,9 +34,11 @@ on:
 permissions:
   contents: read
 
+# Let a running build finish. A newer push waits, and replaces any build that
+# is still waiting, so at most one build runs and one waits.
 concurrency:
   group: fork-build
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
