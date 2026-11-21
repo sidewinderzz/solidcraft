@@ -1582,8 +1582,8 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // New edges for a blend: remember where they sit now (in the model before the feature).
     if let (
-        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, .. } | FeatureKind::Chamfer { edges: b, .. },
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. } | FeatureKind::Dogbone { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, .. } | FeatureKind::Chamfer { edges: b, .. } | FeatureKind::Dogbone { edges: b, .. },
     ) = (&nf.kind, &f.kind)
         && a != b
     {
@@ -2371,6 +2371,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
